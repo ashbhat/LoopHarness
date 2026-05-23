@@ -39,6 +39,7 @@
 
 /* Begin PBXFileReference section */
 		5EE7AAD22FB7A82B00062171 /* LoopShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LoopShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		5EF6DC392FC23F5800183249 /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
 		6A0903832CD69D9500E70D46 /* Loop.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Loop.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6B00010100000000DEADBEEF /* LoopMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LoopMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6C00020100000000DEADBEEF /* LoopVision.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LoopVision.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -213,6 +214,7 @@
 		6A09037A2CD69D9500E70D46 = {
 			isa = PBXGroup;
 			children = (
+				5EF6DC392FC23F5800183249 /* Secrets.xcconfig */,
 				6A0903852CD69D9500E70D46 /* intel */,
 				6B00010500000000DEADBEEF /* intelmac */,
 				5EE7AAD32FB7A82B00062171 /* LoopShare */,
@@ -594,6 +596,7 @@
 		};
 		6A0903992CD69D9600E70D46 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 5EF6DC392FC23F5800183249 /* Secrets.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -657,6 +660,7 @@
 		};
 		6A09039A2CD69D9600E70D46 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 5EF6DC392FC23F5800183249 /* Secrets.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
