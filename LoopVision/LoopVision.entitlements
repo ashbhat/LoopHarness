@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  These mirror the iOS (intel) and Mac (intelmac) entitlements so the
+	  shared backend works end-to-end on Vision Pro:
+	   - KeyStore reads the Deepgram / model API keys from the *synchronized*
+	     iCloud Keychain. keychain-access-groups points at the iOS app's
+	     bundle id (com.bhat.intel, not com.bhat.intel.vision) so Vision sees
+	     the keys the iPhone/Mac stored.
+	   - SimpleConversationManager stores conversation NDJSON in the shared
+	     iCloud container so a turn started here continues on iPhone/Mac.
+	   - iCloudKVSDefaults uses the shared key-value store id (hardcoded to
+	     com.bhat.intel rather than this app's CFBundleIdentifier) so synced
+	     defaults match the other platforms.
+	  NOTE: the Apple Developer App ID for com.bhat.intel.vision must have
+	  iCloud, App Groups and Keychain Sharing capabilities enabled, and the
+	  signing identity must be in the same team as com.bhat.intel, for these
+	  to resolve at build/sign time.
+	-->
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.com.bhat.intel</string>
+	</array>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudDocuments</string>
+		<string>CloudKit</string>
+	</array>
+	<key>com.apple.developer.ubiquity-container-identifiers</key>
+	<array>
+		<string>iCloud.com.bhat.intel</string>
+	</array>
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>$(TeamIdentifierPrefix)com.bhat.intel</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.bhat.intel</string>
+	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.bhat.intel</string>
+	</array>
+</dict>
+</plist>

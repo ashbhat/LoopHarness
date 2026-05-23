@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Loop listens while you pinch and hold so you can talk to it.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Loop transcribes your held-pinch speech into messages.</string>
+	<!--
+	  The shared intel/ backend reaches privacy-sensitive APIs the same way
+	  it does on iPhone/Mac. MusicController.bootstrap() runs on every agent
+	  turn (AgentHarness) and calls MusicAuthorization.request(), which hard-
+	  crashes without NSAppleMusicUsageDescription — that's the immediate
+	  fix. The rest mirror intel/Info.plist so a model-invoked skill (maps,
+	  photos, camera, calendar) doesn't crash the same way later.
+	-->
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Loop uses Apple Music to find tracks, build playlists, and play music that matches the mood of the conversation.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Loop uses your location to answer location-aware questions like nearby places, weather, and travel time.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Loop reads your calendar to answer schedule questions and drafts new events for you to review before saving.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Loop saves images you generate in chat to your Photos library when you tap download.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Loop uses your camera so you can take a photo and attach it to a message.</string>
+	<!--
+	  LoopVisionApp's only scene is a `.volumetric` WindowGroup. On visionOS a
+	  volumetric window's scene *session role* is
+	  UIWindowSceneSessionRoleVolumetricApplication, NOT the default
+	  UIWindowSceneSessionRoleApplication. At launch visionOS asks for the
+	  preferred default session role; if it isn't pinned to the volumetric
+	  role the system spins up a plain application-role scene that the
+	  volumetric-only App body can't satisfy, and SwiftUI hard-crashes with
+	  "no scenes declared in your app body match this role"
+	  (SwiftUI/UIKitAppDelegate.swift). So we must pin it explicitly here —
+	  Xcode's generated manifest defaults to the plain role and crashes the
+	  same way. UISceneConfigurations stays empty: scenes are SwiftUI-managed.
+	  The shared intel/ iOS app keeps its own manifest in intel/Info.plist
+	  (storyboard/UIKit, unrelated to this plist).
+	-->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationPreferredDefaultSceneSessionRole</key>
+		<string>UIWindowSceneSessionRoleVolumetricApplication</string>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+		<key>UISceneConfigurations</key>
+		<dict/>
+	</dict>
+</dict>
+</plist>

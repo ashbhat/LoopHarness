@@ -1,0 +1,46 @@
+# ─── Secrets / local config (NEVER commit) ────────────────────────────
+.env
+.env.*
+!.env.example
+Secrets.xcconfig
+*.secrets.xcconfig
+*.p12
+*.mobileprovision
+*.cer
+*.pem
+*.key
+
+# ─── Xcode / build ────────────────────────────────────────────────────
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.swiftpm
+
+# ─── macOS ────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# ─── Python (scripts/) ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ─── Editor / tooling local state ─────────────────────────────────────
+.vscode/
+.idea/
+.claude/settings.local.json
+
+# ─── Misc ─────────────────────────────────────────────────────────────
+*.log
+voter_guide.xcodeproj/

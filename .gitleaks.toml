@@ -1,0 +1,26 @@
+# Gitleaks config for LoopHarness.
+# Extends the default ruleset; adds allowlisting for the intentional
+# placeholders this repo ships with.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "LoopHarness intentional placeholders & example files"
+
+paths = [
+  '''\.env\.example''',
+  '''Secrets\.xcconfig\.example''',
+  '''docs/SECRET_AUDIT\.md''',
+  '''docs/PERSONAL_DATA_AUDIT\.md''',
+  '''SECURITY\.md''',
+]
+
+regexes = [
+  # Xcode build-setting placeholders, e.g. $(OPENAI_API_KEY)
+  '''\$\([A-Z0-9_]+\)''',
+  # Documented placeholder strings
+  '''CHANGE_ME''',
+  '''your-backend\.example\.com''',
+  '''your-domain\.ngrok-free\.dev''',
+]

@@ -1,0 +1,962 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		5EE7AADC2FB7A82B00062171 /* LoopShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5EE7AAD22FB7A82B00062171 /* LoopShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		DA17C12F00000000000000F2 /* SwiftGitX in Frameworks */ = {isa = PBXBuildFile; productRef = DA17C12F00000000000000F4 /* SwiftGitX */; };
+		DA17C12F00000000000000F3 /* SwiftGitX in Frameworks */ = {isa = PBXBuildFile; productRef = DA17C12F00000000000000F5 /* SwiftGitX */; };
+		DA17C12F00000000000000F6 /* SwiftGitX in Frameworks */ = {isa = PBXBuildFile; productRef = DA17C12F00000000000000F7 /* SwiftGitX */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		5EE7AADA2FB7A82B00062171 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6A09037B2CD69D9500E70D46 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5EE7AAD12FB7A82B00062171;
+			remoteInfo = LoopShare;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		5EE7AAE12FB7A82B00062171 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				5EE7AADC2FB7A82B00062171 /* LoopShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		5EE7AAD22FB7A82B00062171 /* LoopShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LoopShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		6A0903832CD69D9500E70D46 /* Loop.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Loop.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6B00010100000000DEADBEEF /* LoopMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LoopMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6C00020100000000DEADBEEF /* LoopVision.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LoopVision.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		5EE7AAE02FB7A82B00062171 /* Exceptions for "LoopShare" folder in "LoopShare" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 5EE7AAD12FB7A82B00062171 /* LoopShare */;
+		};
+		6A0903952CD69D9600E70D46 /* Exceptions for "intel" folder in "Loop" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 6A0903822CD69D9500E70D46 /* Loop */;
+		};
+		6B00010600000000DEADBEEF /* Exceptions for "intel" folder in "LoopMac" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				action_spec.md,
+				AppDelegate.swift,
+				Assets.xcassets,
+				HelperViews/AvatarView.swift,
+				HelperViews/ShimmerLabel.swift,
+				ImageViewerVC.swift,
+				Info.plist,
+				LifeView/LifeView.swift,
+				MainVC.swift,
+				MarkdownEditorViewController.swift,
+				MessageBox.swift,
+				MessageBoxSpec.md,
+				MessagingCell.swift,
+				MessagingVC.swift,
+				Onboarding/OnboardingState.swift,
+				Onboarding/OnboardingViewController.swift,
+				SceneDelegate.swift,
+				Settings/IntegrationsVC.swift,
+				Settings/KeyEditVC.swift,
+				Settings/KeysVC.swift,
+				Settings/ModelPickerVC.swift,
+				Settings/SettingsVC.swift,
+				SideDrawerViewController.swift,
+				SpeechPipeline/EarconPlayer.swift,
+				SpeechPipeline/VoiceLoopCoordinator.swift,
+				TriggerIntent.swift,
+			);
+			target = 6B00010A00000000DEADBEEF /* LoopMac */;
+		};
+		6B00010C00000000DEADBEEF /* Exceptions for "intelmac" folder in "LoopMac" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 6B00010A00000000DEADBEEF /* LoopMac */;
+		};
+		6C00020600000000DEADBEEF /* Exceptions for "LoopVision" folder in "LoopVision" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 6C00020A00000000DEADBEEF /* LoopVision */;
+		};
+		6C00020D00000000DEADBEEF /* Exceptions for "intel" folder in "LoopVision" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				action_spec.md,
+				AppDelegate.swift,
+				Assets.xcassets,
+				HelperViews/AvatarView.swift,
+				HelperViews/ShimmerLabel.swift,
+				ImageViewerVC.swift,
+				Info.plist,
+				LifeView/LifeView.swift,
+				MainVC.swift,
+				MarkdownEditorViewController.swift,
+				MessageBox.swift,
+				MessageBoxSpec.md,
+				MessagingCell.swift,
+				MessagingVC.swift,
+				Onboarding/OnboardingState.swift,
+				Onboarding/OnboardingViewController.swift,
+				SceneDelegate.swift,
+				Settings/IntegrationsVC.swift,
+				Settings/KeyEditVC.swift,
+				Settings/KeysVC.swift,
+				Settings/ModelPickerVC.swift,
+				Settings/SettingsVC.swift,
+				SideDrawerViewController.swift,
+				SpeechPipeline/EarconPlayer.swift,
+				TriggerIntent.swift,
+			);
+			target = 6C00020A00000000DEADBEEF /* LoopVision */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		5EE7AAD32FB7A82B00062171 /* LoopShare */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				5EE7AAE02FB7A82B00062171 /* Exceptions for "LoopShare" folder in "LoopShare" target */,
+			);
+			path = LoopShare;
+			sourceTree = "<group>";
+		};
+		6A0903852CD69D9500E70D46 /* intel */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				6A0903952CD69D9600E70D46 /* Exceptions for "intel" folder in "Loop" target */,
+				6B00010600000000DEADBEEF /* Exceptions for "intel" folder in "LoopMac" target */,
+				6C00020D00000000DEADBEEF /* Exceptions for "intel" folder in "LoopVision" target */,
+			);
+			path = intel;
+			sourceTree = "<group>";
+		};
+		6B00010500000000DEADBEEF /* intelmac */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				6B00010C00000000DEADBEEF /* Exceptions for "intelmac" folder in "LoopMac" target */,
+			);
+			path = intelmac;
+			sourceTree = "<group>";
+		};
+		6C00020500000000DEADBEEF /* LoopVision */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				6C00020600000000DEADBEEF /* Exceptions for "LoopVision" folder in "LoopVision" target */,
+			);
+			path = LoopVision;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		5EE7AACF2FB7A82B00062171 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6A0903802CD69D9500E70D46 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DA17C12F00000000000000F2 /* SwiftGitX in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6B00010300000000DEADBEEF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DA17C12F00000000000000F3 /* SwiftGitX in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6C00020300000000DEADBEEF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DA17C12F00000000000000F6 /* SwiftGitX in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		6A09037A2CD69D9500E70D46 = {
+			isa = PBXGroup;
+			children = (
+				6A0903852CD69D9500E70D46 /* intel */,
+				6B00010500000000DEADBEEF /* intelmac */,
+				5EE7AAD32FB7A82B00062171 /* LoopShare */,
+				6C00020500000000DEADBEEF /* LoopVision */,
+				6A0903842CD69D9500E70D46 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		6A0903842CD69D9500E70D46 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				6A0903832CD69D9500E70D46 /* Loop.app */,
+				6B00010100000000DEADBEEF /* LoopMac.app */,
+				5EE7AAD22FB7A82B00062171 /* LoopShare.appex */,
+				6C00020100000000DEADBEEF /* LoopVision.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		5EE7AAD12FB7A82B00062171 /* LoopShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5EE7AADD2FB7A82B00062171 /* Build configuration list for PBXNativeTarget "LoopShare" */;
+			buildPhases = (
+				5EE7AACE2FB7A82B00062171 /* Sources */,
+				5EE7AACF2FB7A82B00062171 /* Frameworks */,
+				5EE7AAD02FB7A82B00062171 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5EE7AAD32FB7A82B00062171 /* LoopShare */,
+			);
+			name = LoopShare;
+			packageProductDependencies = (
+			);
+			productName = LoopShare;
+			productReference = 5EE7AAD22FB7A82B00062171 /* LoopShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		6A0903822CD69D9500E70D46 /* Loop */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6A0903962CD69D9600E70D46 /* Build configuration list for PBXNativeTarget "Loop" */;
+			buildPhases = (
+				6A09037F2CD69D9500E70D46 /* Sources */,
+				6A0903802CD69D9500E70D46 /* Frameworks */,
+				6A0903812CD69D9500E70D46 /* Resources */,
+				5EE7AAE12FB7A82B00062171 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5EE7AADB2FB7A82B00062171 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				6A0903852CD69D9500E70D46 /* intel */,
+			);
+			name = Loop;
+			packageProductDependencies = (
+				DA17C12F00000000000000F4 /* SwiftGitX */,
+			);
+			productName = Loop;
+			productReference = 6A0903832CD69D9500E70D46 /* Loop.app */;
+			productType = "com.apple.product-type.application";
+		};
+		6B00010A00000000DEADBEEF /* LoopMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6B00010800000000DEADBEEF /* Build configuration list for PBXNativeTarget "LoopMac" */;
+			buildPhases = (
+				6B00010200000000DEADBEEF /* Sources */,
+				6B00010300000000DEADBEEF /* Frameworks */,
+				6B00010400000000DEADBEEF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				6A0903852CD69D9500E70D46 /* intel */,
+				6B00010500000000DEADBEEF /* intelmac */,
+			);
+			name = LoopMac;
+			packageProductDependencies = (
+				DA17C12F00000000000000F5 /* SwiftGitX */,
+			);
+			productName = LoopMac;
+			productReference = 6B00010100000000DEADBEEF /* LoopMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+		6C00020A00000000DEADBEEF /* LoopVision */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6C00020800000000DEADBEEF /* Build configuration list for PBXNativeTarget "LoopVision" */;
+			buildPhases = (
+				6C00020200000000DEADBEEF /* Sources */,
+				6C00020300000000DEADBEEF /* Frameworks */,
+				6C00020400000000DEADBEEF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				6A0903852CD69D9500E70D46 /* intel */,
+				6C00020500000000DEADBEEF /* LoopVision */,
+			);
+			name = LoopVision;
+			packageProductDependencies = (
+				DA17C12F00000000000000F7 /* SwiftGitX */,
+			);
+			productName = LoopVision;
+			productReference = 6C00020100000000DEADBEEF /* LoopVision.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		6A09037B2CD69D9500E70D46 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2610;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					5EE7AAD12FB7A82B00062171 = {
+						CreatedOnToolsVersion = 26.1;
+					};
+					6A0903822CD69D9500E70D46 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					6B00010A00000000DEADBEEF = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					6C00020A00000000DEADBEEF = {
+						CreatedOnToolsVersion = 26.1;
+					};
+				};
+			};
+			buildConfigurationList = 6A09037E2CD69D9500E70D46 /* Build configuration list for PBXProject "Loop" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 6A09037A2CD69D9500E70D46;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				DA17C12F00000000000000F1 /* XCRemoteSwiftPackageReference "SwiftGitX" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 6A0903842CD69D9500E70D46 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				6A0903822CD69D9500E70D46 /* Loop */,
+				6B00010A00000000DEADBEEF /* LoopMac */,
+				5EE7AAD12FB7A82B00062171 /* LoopShare */,
+				6C00020A00000000DEADBEEF /* LoopVision */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		5EE7AAD02FB7A82B00062171 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6A0903812CD69D9500E70D46 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6B00010400000000DEADBEEF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6C00020400000000DEADBEEF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		5EE7AACE2FB7A82B00062171 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6A09037F2CD69D9500E70D46 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6B00010200000000DEADBEEF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6C00020200000000DEADBEEF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		5EE7AADB2FB7A82B00062171 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5EE7AAD12FB7A82B00062171 /* LoopShare */;
+			targetProxy = 5EE7AADA2FB7A82B00062171 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		5EE7AADE2FB7A82B00062171 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LoopShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = LoopShare;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bhat.intel.LoopShare;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5EE7AADF2FB7A82B00062171 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LoopShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = LoopShare;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bhat.intel.LoopShare;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		6A0903972CD69D9600E70D46 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = intel/intel.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = intel/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Loop;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app needs access to your microphone to record voice messages.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We use library to upload your id.";
+				INFOPLIST_KEY_NSSiriUsageDescription = "Used to start shortcut";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "This app needs access to speech recognition to transcribe your voice messages.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UIMainStoryboardFile = Main;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bhat.intel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		6A0903982CD69D9600E70D46 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = intel/intel.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = intel/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Loop;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app needs access to your microphone to record voice messages.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We use library to upload your id.";
+				INFOPLIST_KEY_NSSiriUsageDescription = "Used to start shortcut";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "This app needs access to speech recognition to transcribe your voice messages.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UIMainStoryboardFile = Main;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bhat.intel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		6A0903992CD69D9600E70D46 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		6A09039A2CD69D9600E70D46 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		6B00010900000000DEADBEEF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				AUTOMATION_APPLE_EVENTS = NO;
+				CODE_SIGN_ENTITLEMENTS = intelmac/LoopMac.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_DEBUG_DYLIB = NO;
+				ENABLE_DEBUG_DYLIB_SUPPORT = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = YES;
+				ENABLE_RESOURCE_ACCESS_CAMERA = YES;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = YES;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = YES;
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					"$(SRCROOT)/intel/Base.lproj/*",
+					"$(SRCROOT)/intel/Assets.xcassets",
+					"$(SRCROOT)/intel/Specs/*",
+					"$(SRCROOT)/intel/Specs/**/*",
+					"$(SRCROOT)/intel/sample*.png",
+					"$(SRCROOT)/intel/*.md",
+					"$(SRCROOT)/intel/Specs",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = intelmac/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Loop;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Loop records your voice when you hold control + fn so it can transcribe and send it to the assistant.";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Loop transcribes your speech so the assistant can hear what you say.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bhat.intel.mac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
+				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
+				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = NO;
+				RUNTIME_EXCEPTION_DEBUGGING_TOOL = NO;
+				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = NO;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = NO;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		6B00010B00000000DEADBEEF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				AUTOMATION_APPLE_EVENTS = NO;
+				CODE_SIGN_ENTITLEMENTS = intelmac/LoopMac.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_DEBUG_DYLIB = NO;
+				ENABLE_DEBUG_DYLIB_SUPPORT = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = YES;
+				ENABLE_RESOURCE_ACCESS_CAMERA = YES;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = YES;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = YES;
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					"$(SRCROOT)/intel/Base.lproj/*",
+					"$(SRCROOT)/intel/Assets.xcassets",
+					"$(SRCROOT)/intel/Specs/*",
+					"$(SRCROOT)/intel/Specs/**/*",
+					"$(SRCROOT)/intel/sample*.png",
+					"$(SRCROOT)/intel/*.md",
+					"$(SRCROOT)/intel/Specs",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = intelmac/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Loop;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Loop records your voice when you hold control + fn so it can transcribe and send it to the assistant.";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Loop transcribes your speech so the assistant can hear what you say.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bhat.intel.mac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
+				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
+				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = NO;
+				RUNTIME_EXCEPTION_DEBUGGING_TOOL = NO;
+				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = NO;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = NO;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		6C00020900000000DEADBEEF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = LoopVision/LoopVision.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LoopVision/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Loop;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bhat.intel.vision;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = xros;
+				SUPPORTED_PLATFORMS = "xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		6C00020B00000000DEADBEEF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = LoopVision/LoopVision.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LoopVision/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Loop;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bhat.intel.vision;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = xros;
+				SUPPORTED_PLATFORMS = "xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		5EE7AADD2FB7A82B00062171 /* Build configuration list for PBXNativeTarget "LoopShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5EE7AADE2FB7A82B00062171 /* Debug */,
+				5EE7AADF2FB7A82B00062171 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		6A09037E2CD69D9500E70D46 /* Build configuration list for PBXProject "Loop" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6A0903992CD69D9600E70D46 /* Debug */,
+				6A09039A2CD69D9600E70D46 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		6A0903962CD69D9600E70D46 /* Build configuration list for PBXNativeTarget "Loop" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6A0903972CD69D9600E70D46 /* Debug */,
+				6A0903982CD69D9600E70D46 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		6B00010800000000DEADBEEF /* Build configuration list for PBXNativeTarget "LoopMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6B00010900000000DEADBEEF /* Debug */,
+				6B00010B00000000DEADBEEF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		6C00020800000000DEADBEEF /* Build configuration list for PBXNativeTarget "LoopVision" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6C00020900000000DEADBEEF /* Debug */,
+				6C00020B00000000DEADBEEF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		DA17C12F00000000000000F1 /* XCRemoteSwiftPackageReference "SwiftGitX" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ibrahimcetin/SwiftGitX.git";
+			requirement = {
+				kind = exactVersion;
+				version = 0.4.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		DA17C12F00000000000000F4 /* SwiftGitX */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DA17C12F00000000000000F1 /* XCRemoteSwiftPackageReference "SwiftGitX" */;
+			productName = SwiftGitX;
+		};
+		DA17C12F00000000000000F5 /* SwiftGitX */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DA17C12F00000000000000F1 /* XCRemoteSwiftPackageReference "SwiftGitX" */;
+			productName = SwiftGitX;
+		};
+		DA17C12F00000000000000F7 /* SwiftGitX */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DA17C12F00000000000000F1 /* XCRemoteSwiftPackageReference "SwiftGitX" */;
+			productName = SwiftGitX;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 6A09037B2CD69D9500E70D46 /* Project object */;
+}

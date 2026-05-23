@@ -1,0 +1,148 @@
+//
+//  SettingsVC.swift
+//  Loop
+//
+//  Root settings screen reachable from the conversation pane's nav bar.
+//  Organized as a section'd table so future panes (model picker, sync, etc.)
+//  drop in without restructuring.
+//
+
+import UIKit
+
+final class SettingsVC: UIViewController {
+
+    private let tableView = UITableView(frame: .zero, style: .insetGrouped)
+
+    /// Single row in a section. The `handler` is invoked on the main queue
+    /// when the user taps it.
+    private struct Row {
+        let title: String
+        let icon: String
+        let handler: (SettingsVC) -> Void
+    }
+
+    private struct Section {
+        let header: String?
+        let rows: [Row]
+    }
+
+    private let sections: [Section] = [
+        Section(header: nil, rows: [
+            Row(title: "Model", icon: "cpu") { settings in
+                settings.navigationController?.pushViewController(ModelPickerVC(), animated: true)
+            },
+            Row(title: "Integrations", icon: "puzzlepiece.extension.fill") { settings in
+                settings.navigationController?.pushViewController(IntegrationsVC(), animated: true)
+            },
+            Row(title: "Scheduled", icon: "calendar.badge.clock") { settings in
+                settings.navigationController?.pushViewController(ScheduledTasksVC(), animated: true)
+            },
+            Row(title: "Subagents", icon: "hammer") { settings in
+                settings.navigationController?.pushViewController(SubagentsListVC(), animated: true)
+            },
+            Row(title: "Keys", icon: "key.fill") { settings in
+                settings.navigationController?.pushViewController(KeysVC(), animated: true)
+            }
+        ]),
+        // Lives in its own section so it reads as a discrete debug/utility
+        // affordance rather than something the user would tap as part of a
+        // normal settings sweep.
+        Section(header: "Help", rows: [
+            Row(title: "Replay onboarding", icon: "arrow.counterclockwise") { settings in
+                settings.confirmReplayOnboarding()
+            }
+        ]),
+    ]
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "Settings"
+        view.backgroundColor = .systemGroupedBackground
+
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "row")
+        view.addSubview(tableView)
+        NSLayoutConstraint.activate([
+            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+
+        // Standard "Done" so the user can dismiss when we're presented modally.
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .done,
+            target: self,
+            action: #selector(dismissTapped)
+        )
+    }
+
+    @objc private func dismissTapped() {
+        dismiss(animated: true)
+    }
+
+    /// Confirm before clearing the onboarding flags — the row sits in a normal
+    /// settings list and we don't want a stray tap to throw the user back to
+    /// step 1 unexpectedly.
+    private func confirmReplayOnboarding() {
+        let alert = UIAlertController(
+            title: "Replay onboarding?",
+            message: "You'll see the welcome flow again from the start.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Replay", style: .default) { [weak self] _ in
+            self?.replayOnboarding()
+        })
+        present(alert, animated: true)
+    }
+
+    /// Resets the onboarding flags and presents the modal on top of Settings.
+    /// We don't bounce through SceneDelegate.presentOnboardingIfNeeded because
+    /// that only runs on scene connect — driving the present from here means
+    /// the user gets immediate feedback without a relaunch.
+    private func replayOnboarding() {
+        OnboardingState.isComplete = false
+        OnboardingState.lastStep = 0
+
+        let vc = OnboardingViewController()
+        // Dismiss Settings on completion so the user lands back on the
+        // conversation pane, matching what they'd see on a real first run.
+        vc.onCompleted = { [weak self] in
+            self?.dismiss(animated: true)
+        }
+        present(vc, animated: true)
+    }
+}
+
+extension SettingsVC: UITableViewDataSource, UITableViewDelegate {
+    func numberOfSections(in tableView: UITableView) -> Int {
+        sections.count
+    }
+
+    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        sections[section].header
+    }
+
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        sections[section].rows.count
+    }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "row", for: indexPath)
+        let row = sections[indexPath.section].rows[indexPath.row]
+        var config = cell.defaultContentConfiguration()
+        config.text = row.title
+        config.image = UIImage(systemName: row.icon)
+        cell.contentConfiguration = config
+        cell.accessoryType = .disclosureIndicator
+        return cell
+    }
+
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        sections[indexPath.section].rows[indexPath.row].handler(self)
+    }
+}
