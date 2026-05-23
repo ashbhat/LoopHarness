@@ -1,0 +1,17 @@
+// Checked-in base configuration. Provides empty defaults so a fresh clone
+// builds without errors, then pulls in your local Secrets.xcconfig (gitignored)
+// if it exists. See Secrets.xcconfig.example for what to put in your local file.
+
+// Defaults — keep these so the build never fails on a missing override.
+DEVELOPMENT_TEAM =
+DEEPGRAM_API_KEY =
+ELEVEN_LABS_KEY =
+EXA_API_KEY =
+OPENAI_API_KEY =
+CURSOR_API_KEY =
+OBSIDIAN_API_KEY =
+OBSIDIAN_BASE_URL =
+
+// Local overrides (gitignored). Copy Secrets.xcconfig.example → Secrets.xcconfig.
+// The `?` makes the include optional: no error if the file is absent.
+#include? "Secrets.xcconfig"
