@@ -1,6 +1,6 @@
 //
 //  MarkdownTableParser.swift
-//  intel
+//  Loop
 //
 //  Splits a markdown string into prose and GFM-table segments so each
 //  client (iOS UIStackView, macOS NSGridView, visionOS SwiftUI Grid) can

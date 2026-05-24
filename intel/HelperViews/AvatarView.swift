@@ -1,6 +1,6 @@
 //
 //  AvatarView.swift
-//  intel
+//  Loop
 //
 //  iOS port of intelmac/AvatarView.swift. UIKit equivalent of the Mac
 //  pixel-art "orb" — same intensity formula, same per-mode parameters, same

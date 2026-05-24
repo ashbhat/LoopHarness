@@ -1,6 +1,6 @@
 //
 //  SharedAttachmentInbox.swift
-//  intel
+//  Loop
 //
 //  One-slot inbox the SceneDelegate uses to hand a freshly-shared
 //  attachment to MessagingVC when the share-in URL arrives before

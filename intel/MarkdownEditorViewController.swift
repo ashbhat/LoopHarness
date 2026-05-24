@@ -1,6 +1,6 @@
 //
 //  MarkdownEditorViewController.swift
-//  intel (iOS)
+//  Loop (iOS)
 //
 //  A real, editable markdown editor — opened in place of QuickLook when the
 //  user taps a `.md` file (in the Files drawer or via a file link inside a

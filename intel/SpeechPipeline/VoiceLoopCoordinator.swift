@@ -1,6 +1,6 @@
 //
 //  VoiceLoopCoordinator.swift
-//  intel
+//  Loop
 //
 //  Phase A surface of the macOS VoiceLoopCoordinator (intelmac/
 //  VoiceLoopCoordinator.swift). On iOS the recording, STT, LLM, and TTS

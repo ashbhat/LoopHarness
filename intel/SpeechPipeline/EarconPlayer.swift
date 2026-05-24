@@ -1,6 +1,6 @@
 //
 //  EarconPlayer.swift
-//  intel
+//  Loop
 //
 //  iOS port of intelmac/EarconPlayer.swift. Same synthesized PCM buffers,
 //  same frequencies/durations/volumes, same half-cosine

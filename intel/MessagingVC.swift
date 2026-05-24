@@ -1198,7 +1198,7 @@ extension MessagingVC: MessageBoxDelegate {
 // UI Setup
 extension MessagingVC {
     func setupNav() {
-        self.title = "Intel"
+        self.title = "Loop"
 
         // Sync earcon enable flag with the persisted mute state at launch
         // (the setter wires this on toggles; this covers the cold start).

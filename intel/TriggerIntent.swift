@@ -1,6 +1,6 @@
 //
 //  TriggerIntent.swift
-//  intel
+//  Loop
 //
 //  Created by Ash Bhat on 12/31/25.
 //

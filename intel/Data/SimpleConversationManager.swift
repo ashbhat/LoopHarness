@@ -1,6 +1,6 @@
 //
 //  SimpleConversationManager.swift
-//  intel
+//  Loop
 //
 //  Created by Ash Bhat on 11/2/24.
 //

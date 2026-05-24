@@ -1,6 +1,6 @@
 //
 //  ConversationFileStore.swift
-//  intel
+//  Loop
 //
 //  Conversation persistence backed by iCloud Documents. One append-only
 //  NDJSON file per conversation under:
