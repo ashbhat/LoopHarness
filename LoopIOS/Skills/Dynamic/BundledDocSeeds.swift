@@ -156,6 +156,21 @@ routes through `AgentHarness`, which decides cloud vs. on-device and assembles
 the full system prompt. Conversations persist via
 `SimpleConversationManager` and sync over iCloud so iPhone and Mac stay in
 lock-step.
+
+## Open-source repository
+
+Loop's own source code is open-sourced at **ashbhat/loopharness**
+(https://github.com/ashbhat/loopharness). When the user asks how Loop works
+internally, or wants to inspect specific implementation details, use the
+GitHub skill tools to read the code directly:
+
+- `github_file_contents` — read a specific file from the repo.
+- `search_code` — search for symbols, patterns, or keywords across the repo.
+- `list_github_repos` — confirm the repo exists and check metadata.
+- `clone_github_repo` — clone the repo into the Workspace for deeper
+  exploration or diffs.
+
+These tools work against the public repo — no extra credentials are needed.
 """#
     )
 }

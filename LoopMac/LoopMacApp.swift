@@ -423,6 +423,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         replayOnboardingItem.target = self
         settingsMenu.addItem(replayOnboardingItem)
 
+        let viewSourceItem = NSMenuItem(
+            title: "View Source Code…",
+            action: #selector(openSourceRepo(_:)),
+            keyEquivalent: ""
+        )
+        viewSourceItem.target = self
+        settingsMenu.addItem(viewSourceItem)
+
         settingsMenuItem.submenu = settingsMenu
 
         NSApplication.shared.mainMenu = mainMenu
@@ -702,6 +710,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboardingController?.close()
         onboardingController = nil
         presentOnboarding()
+    }
+
+    @objc fileprivate func openSourceRepo(_ sender: Any?) {
+        if let url = URL(string: "https://github.com/ashbhat/loopharness") {
+            NSWorkspace.shared.open(url)
+        }
     }
 }
 
