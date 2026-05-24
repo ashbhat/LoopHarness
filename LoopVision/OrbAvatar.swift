@@ -2,8 +2,8 @@
 //  OrbAvatar.swift
 //  LoopVision
 //
-//  The 3D port of the iOS/Mac "orb" avatar (intel/HelperViews/AvatarView.swift,
-//  intelmac/AvatarView.swift). The 2D versions render an intensity *field* as a
+//  The 3D port of the iOS/Mac "orb" avatar (LoopIOS/HelperViews/AvatarView.swift,
+//  LoopMac/AvatarView.swift). The 2D versions render an intensity *field* as a
 //  grid of pixel cells; this version keeps that idea but lifts it into a true
 //  volume: a lattice of small glowing spheres, each lit by the same intensity
 //  formula evaluated in 3D. The result reads like a volumetric dot-matrix — a

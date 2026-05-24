@@ -7,11 +7,11 @@
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Loop transcribes your held-pinch speech into messages.</string>
 	<!--
-	  The shared intel/ backend reaches privacy-sensitive APIs the same way
+	  The shared LoopIOS/ backend reaches privacy-sensitive APIs the same way
 	  it does on iPhone/Mac. MusicController.bootstrap() runs on every agent
 	  turn (AgentHarness) and calls MusicAuthorization.request(), which hard-
 	  crashes without NSAppleMusicUsageDescription — that's the immediate
-	  fix. The rest mirror intel/Info.plist so a model-invoked skill (maps,
+	  fix. The rest mirror LoopIOS/Info.plist so a model-invoked skill (maps,
 	  photos, camera, calendar) doesn't crash the same way later.
 	-->
 	<key>NSAppleMusicUsageDescription</key>
@@ -36,7 +36,7 @@
 	  (SwiftUI/UIKitAppDelegate.swift). So we must pin it explicitly here —
 	  Xcode's generated manifest defaults to the plain role and crashes the
 	  same way. UISceneConfigurations stays empty: scenes are SwiftUI-managed.
-	  The shared intel/ iOS app keeps its own manifest in intel/Info.plist
+	  The shared LoopIOS/ iOS app keeps its own manifest in LoopIOS/Info.plist
 	  (storyboard/UIKit, unrelated to this plist).
 	-->
 	<key>UIApplicationSceneManifest</key>

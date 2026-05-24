@@ -18,11 +18,11 @@ from pathlib import Path
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Probe xcodebuild commands used by deploy_ios.py.")
-    parser.add_argument("--scheme", default="intel_ios", help="Xcode scheme to target.")
+    parser.add_argument("--scheme", default="Loop_iOS", help="Xcode scheme to target.")
     parser.add_argument("--configuration", default="Release", help="Build configuration.")
     parser.add_argument(
         "--project",
-        default="intel.xcodeproj",
+        default="Loop.xcodeproj",
         help=".xcodeproj to use (ignored when --workspace is supplied).",
     )
     parser.add_argument("--workspace", help="Optional .xcworkspace to use instead of the project.")

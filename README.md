@@ -20,17 +20,17 @@ conversations.
 
 ## Features
 
-- **Agent harness** — a turn-based runtime (`intel/AgentHarness/`) that
+- **Agent harness** — a turn-based runtime (`LoopIOS/AgentHarness/`) that
   orchestrates model calls, tool/skill dispatch, and context management.
-- **Skill system** — modular, self-describing tools under `intel/Skills/`
+- **Skill system** — modular, self-describing tools under `LoopIOS/Skills/`
   (FileSystem, Exa web search, Obsidian, Notion, Music, Git, URL fetch, and
   dynamically authored skills).
 - **Persistent memory** — local Markdown-based memory and conversation
   storage; the agent reads and writes its own long-term knowledge.
 - **Sub-agents** — spawn isolated agents for multi-step background tasks
-  (`intel/SubAgents/`).
+  (`LoopIOS/SubAgents/`).
 - **Voice pipeline** — push-to-talk capture, Deepgram STT, ElevenLabs/Apple
-  TTS, and speech sanitization (`intel/SpeechPipeline/`, `intelmac/`).
+  TTS, and speech sanitization (`LoopIOS/SpeechPipeline/`, `LoopMac/`).
 - **Obsidian integration** — read/write an Obsidian vault through a
   self-hosted relay.
 - **Scheduling** — background task scheduling for periodic/idle work.
@@ -40,16 +40,16 @@ conversations.
 ## Architecture
 
 ```
-intel/                 iOS app
+LoopIOS/               iOS app
   AgentHarness/         turn loop, slash commands, skill dispatch
   Skills/               pluggable tools (FileSystem, Exa, Obsidian, Notion, …)
   SubAgents/            isolated multi-step agents
   SpeechPipeline/       STT/TTS + sanitization
   Settings/KeyStore     Keychain-first credential store
   Data/                 conversation + memory persistence
-intelmac/              macOS app (menu-bar, voice, terminal skill)
+LoopMac/               macOS app (menu-bar, voice, terminal skill)
 LoopShare/             iOS share extension
-intel-share/ intelmac-share/   share-extension targets
+LoopIOSShare/ LoopMacShare/   share-extension targets
 scripts/               Python helper/deploy utilities
 Loop.xcodeproj         the Xcode project (app product name: "Loop")
 ```

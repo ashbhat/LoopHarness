@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>Loop</string>
+	<key>CFBundleName</key>
+	<string>LoopMac</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.bhat.intel.urlscheme</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>commandintel</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSUIElement</key>
+	<false/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Loop records your voice when you hold control + fn so it can transcribe and send it to the assistant.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Loop transcribes your speech when you hold control + fn so the assistant can hear what you say.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Loop reads your calendar to answer schedule questions and drafts new events for you to review before saving.</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Loop uses Apple Music to find tracks and play music that matches the mood of the conversation.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Loop drives Terminal, Ghostty, and other terminal apps via AppleScript so it can open windows and run shell commands on your behalf — e.g. starting a Claude Code session in one of your repos.</string>
+	<key>DEEPGRAM_API_KEY</key>
+	<string>$(DEEPGRAM_API_KEY)</string>
+	<key>ELEVEN_LABS_KEY</key>
+	<string>$(ELEVEN_LABS_KEY)</string>
+	<key>EXA_API_KEY</key>
+	<string>$(EXA_API_KEY)</string>
+	<key>OPENAI_API_KEY</key>
+	<string>$(OPENAI_API_KEY)</string>
+	<key>ANTHROPIC_API_KEY</key>
+	<string>$(ANTHROPIC_API_KEY)</string>
+	<key>KIMI_API_KEY</key>
+	<string>$(KIMI_API_KEY)</string>
+	<key>OBSIDIAN_API_KEY</key>
+	<string>$(OBSIDIAN_API_KEY)</string>
+	<key>OBSIDIAN_BASE_URL</key>
+	<string>$(OBSIDIAN_BASE_URL)</string>
+	<key>NSUbiquitousContainers</key>
+	<dict>
+		<key>iCloud.com.bhat.intel</key>
+		<dict>
+			<key>NSUbiquitousContainerIsDocumentScopePublic</key>
+			<true/>
+			<key>NSUbiquitousContainerName</key>
+			<string>Loop</string>
+			<key>NSUbiquitousContainerSupportedFolderLevels</key>
+			<string>Any</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

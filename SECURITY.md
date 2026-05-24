@@ -10,7 +10,7 @@ reports within a few days.
 ## Credential model
 
 LoopHarness never bundles API keys. Keys are entered in-app and stored in the
-Apple Keychain (`intel/Settings/KeyStore.swift`). `Info.plist` entries use
+Apple Keychain (`LoopIOS/Settings/KeyStore.swift`). `Info.plist` entries use
 `$(VAR)` placeholders, which `KeyStore` treats as *absent* — falling back to
 the in-app entry flow. Nothing in this repository is a live credential.
 

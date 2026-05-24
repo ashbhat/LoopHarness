@@ -18,11 +18,11 @@ rotation checklist.
 
 | Source (original) | Key | Remediation in LoopHarness |
 |---|---|---|
-| `intel/Info.plist`, `intelmac/Info.plist` | `DEEPGRAM_API_KEY` | value → `$(DEEPGRAM_API_KEY)` placeholder |
+| `LoopIOS/Info.plist`, `LoopMac/Info.plist` | `DEEPGRAM_API_KEY` | value → `$(DEEPGRAM_API_KEY)` placeholder |
 | same | `ELEVEN_LABS_KEY` | → `$(ELEVEN_LABS_KEY)` |
 | same | `EXA_API_KEY` | → `$(EXA_API_KEY)` |
 | same | `OPENAI_API_KEY` (`sk-proj-…`) | → `$(OPENAI_API_KEY)` |
-| `intel/Info.plist` (iOS) | `CURSOR_API_KEY` | → `$(CURSOR_API_KEY)` |
+| `LoopIOS/Info.plist` (iOS) | `CURSOR_API_KEY` | → `$(CURSOR_API_KEY)` |
 | same | `OBSIDIAN_API_KEY` | → `$(OBSIDIAN_API_KEY)` |
 | `scripts/test_notion_notes.py`, `scripts/add_to_digital_vault.py` | Notion `ntn_…` token + private page ID | **files excluded from export entirely** |
 
@@ -37,7 +37,7 @@ intended, build-safe state.
 | `Info.plist` ×2 | `OBSIDIAN_BASE_URL` = personal reserved ngrok domain | → `$(OBSIDIAN_BASE_URL)` |
 | `Loop.xcodeproj/project.pbxproj` (8×) | `DEVELOPMENT_TEAM = <team id>` | removed from pbxproj; sourced from gitignored `Secrets.xcconfig` (referenced as the project's base configuration). Contributors set their own team in their local copy of `Secrets.xcconfig`. |
 
-## MEDIUM (`intel/Data/Cloud.swift`)
+## MEDIUM (`LoopIOS/Data/Cloud.swift`)
 
 The `Cloud` class was sanitized in the initial export and has since been
 stripped to a thin `chat()` shim that forwards to `AgentHarness` (the
@@ -55,18 +55,18 @@ was removed). The findings below are kept for historical context.
 - `com.bhat.intel*` bundle / `iCloud.com.bhat.intel` / `group.com.bhat.intel`
   identifiers: public app identifiers, not secrets. Kept (owner-published).
   Optional rebrand is a Phase-3 follow-up.
-- `intel/Specs/done/obsidian_integration_guide.md`: placeholder-only token
+- `LoopIOS/Specs/done/obsidian_integration_guide.md`: placeholder-only token
   references; the real ngrok host was scrubbed.
 
 ## Files excluded from the export (not copied into LoopHarness)
 
 ```
 build/                 (2,687 artifacts — also held copies of every key above)
-.claude/  .vscode/  intel/Specs/.claude/
+.claude/  .vscode/  LoopIOS/Specs/.claude/
 scripts/test_notion_notes.py     scripts/add_to_digital_vault.py   scripts/__pycache__/
 exp/  (real addresses in directions.py)
 eiffel_tower_notes.md  voice_pipeline_redesign.md  what_aviso_can_do.md  agents.md
-intel/sample.png  intel/sample_18bit.png  (unreferenced; real face)
+LoopIOS/sample.png  LoopIOS/sample_18bit.png  (unreferenced; real face)
 **/.DS_Store  **/xcuserdata/  *.xcuserstate  intel.xcodeproj/ (empty stub)
 readme.md (stale "VoterGuide" — replaced with new README.md)
 ```

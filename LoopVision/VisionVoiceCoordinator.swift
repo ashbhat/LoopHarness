@@ -4,12 +4,12 @@
 //
 //  Owns one Vision Pro voice turn: pinch-hold → record → STT → AgentHarness
 //  (via Cloud) → conversation store → spoken reply. This is the visionOS
-//  counterpart of intelmac/VoiceLoopCoordinator.swift; the shared pieces
+//  counterpart of LoopMac/VoiceLoopCoordinator.swift; the shared pieces
 //  (DeepgramSTT, AppleSTT, Cloud/AgentHarness, SimpleConversationManager,
-//  KeyStore, MessageStruct) are the same intel/ sources LoopMac compiles.
+//  KeyStore, MessageStruct) are the same LoopIOS/ sources LoopMac compiles.
 //
 //  The pinch gesture is wired to be the exact equivalent of holding
-//  fn+control on the Mac (see intelmac/HotKeyMonitor): `pinchBegan()` starts
+//  fn+control on the Mac (see LoopMac/HotKeyMonitor): `pinchBegan()` starts
 //  capture, `pinchEnded()` stops it and sends the turn.
 //
 //  Concurrency intentionally mirrors the Mac coordinator: a plain class
@@ -78,7 +78,7 @@ final class VisionVoiceCoordinator {
         }
     }
 
-    // MARK: - Audio + STT (mirrors intelmac beginEngine / beginEngineApple)
+    // MARK: - Audio + STT (mirrors LoopMac beginEngine / beginEngineApple)
     private var audioEngine: AVAudioEngine?
     private var deepgramSTT: DeepgramSTT?
     private var appleSTT: AppleSTT?
@@ -387,7 +387,7 @@ final class VisionVoiceCoordinator {
 
     private func processAssistant(_ message: MessageStruct) {
         // Tool result coming back from a skill — feed it to the harness and
-        // let the model continue, exactly like intelmac/VoiceLoopCoordinator.
+        // let the model continue, exactly like LoopMac/VoiceLoopCoordinator.
         if message.role == "function" {
             messages.append(message)
             state = .thinking
@@ -400,7 +400,7 @@ final class VisionVoiceCoordinator {
         // Model-issued tool call: route through the shared, platform-neutral
         // SkillDispatcher (the same router BackgroundScheduler uses). Any tool
         // that only exists on Mac (MacApp/Terminal — runtime-registered there,
-        // absent from `intel/`) yields a structured "unknown tool" the model
+        // absent from `LoopIOS/`) yields a structured "unknown tool" the model
         // recovers from. The result loops back via the `role == "function"`
         // branch above.
         if let function = message.function {

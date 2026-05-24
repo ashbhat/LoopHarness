@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<!--
-	  These mirror the iOS (intel) and Mac (intelmac) entitlements so the
+	  These mirror the iOS (Loop) and Mac (LoopMac) entitlements so the
 	  shared backend works end-to-end on Vision Pro:
 	   - KeyStore reads the Deepgram / model API keys from the *synchronized*
 	     iCloud Keychain. keychain-access-groups points at the iOS app's

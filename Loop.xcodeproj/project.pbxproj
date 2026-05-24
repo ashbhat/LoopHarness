@@ -53,87 +53,17 @@
 			);
 			target = 5EE7AAD12FB7A82B00062171 /* LoopShare */;
 		};
-		6A0903952CD69D9600E70D46 /* Exceptions for "intel" folder in "Loop" target */ = {
+		6A09038A2CD69D9500E70D46 /* Exceptions for "LoopIOS" folder in "Loop" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
 			target = 6A0903822CD69D9500E70D46 /* Loop */;
 		};
-		6B00010600000000DEADBEEF /* Exceptions for "intel" folder in "LoopMac" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				action_spec.md,
-				AppDelegate.swift,
-				Assets.xcassets,
-				HelperViews/AvatarView.swift,
-				HelperViews/ShimmerLabel.swift,
-				ImageViewerVC.swift,
-				Info.plist,
-				LifeView/LifeView.swift,
-				MainVC.swift,
-				MarkdownEditorViewController.swift,
-				MessageBox.swift,
-				MessageBoxSpec.md,
-				MessagingCell.swift,
-				MessagingVC.swift,
-				Onboarding/OnboardingState.swift,
-				Onboarding/OnboardingViewController.swift,
-				SceneDelegate.swift,
-				Settings/IntegrationsVC.swift,
-				Settings/KeyEditVC.swift,
-				Settings/KeysVC.swift,
-				Settings/ModelPickerVC.swift,
-				Settings/SettingsVC.swift,
-				SideDrawerViewController.swift,
-				SpeechPipeline/EarconPlayer.swift,
-				SpeechPipeline/VoiceLoopCoordinator.swift,
-				TriggerIntent.swift,
-			);
-			target = 6B00010A00000000DEADBEEF /* LoopMac */;
-		};
-		6B00010C00000000DEADBEEF /* Exceptions for "intelmac" folder in "LoopMac" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 6B00010A00000000DEADBEEF /* LoopMac */;
-		};
 		6C00020600000000DEADBEEF /* Exceptions for "LoopVision" folder in "LoopVision" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-			);
-			target = 6C00020A00000000DEADBEEF /* LoopVision */;
-		};
-		6C00020D00000000DEADBEEF /* Exceptions for "intel" folder in "LoopVision" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				action_spec.md,
-				AppDelegate.swift,
-				Assets.xcassets,
-				HelperViews/AvatarView.swift,
-				HelperViews/ShimmerLabel.swift,
-				ImageViewerVC.swift,
-				Info.plist,
-				LifeView/LifeView.swift,
-				MainVC.swift,
-				MarkdownEditorViewController.swift,
-				MessageBox.swift,
-				MessageBoxSpec.md,
-				MessagingCell.swift,
-				MessagingVC.swift,
-				Onboarding/OnboardingState.swift,
-				Onboarding/OnboardingViewController.swift,
-				SceneDelegate.swift,
-				Settings/IntegrationsVC.swift,
-				Settings/KeyEditVC.swift,
-				Settings/KeysVC.swift,
-				Settings/ModelPickerVC.swift,
-				Settings/SettingsVC.swift,
-				SideDrawerViewController.swift,
-				SpeechPipeline/EarconPlayer.swift,
-				TriggerIntent.swift,
 			);
 			target = 6C00020A00000000DEADBEEF /* LoopVision */;
 		};
@@ -148,22 +78,17 @@
 			path = LoopShare;
 			sourceTree = "<group>";
 		};
-		6A0903852CD69D9500E70D46 /* intel */ = {
+		6A0903852CD69D9500E70D46 /* LoopIOS */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				6A0903952CD69D9600E70D46 /* Exceptions for "intel" folder in "Loop" target */,
-				6B00010600000000DEADBEEF /* Exceptions for "intel" folder in "LoopMac" target */,
-				6C00020D00000000DEADBEEF /* Exceptions for "intel" folder in "LoopVision" target */,
+				6A09038A2CD69D9500E70D46 /* Exceptions for "LoopIOS" folder in "Loop" target */,
 			);
-			path = intel;
+			path = LoopIOS;
 			sourceTree = "<group>";
 		};
-		6B00010500000000DEADBEEF /* intelmac */ = {
+		6B00010500000000DEADBEEF /* LoopMac */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				6B00010C00000000DEADBEEF /* Exceptions for "intelmac" folder in "LoopMac" target */,
-			);
-			path = intelmac;
+			path = LoopMac;
 			sourceTree = "<group>";
 		};
 		6C00020500000000DEADBEEF /* LoopVision */ = {
@@ -215,8 +140,8 @@
 			isa = PBXGroup;
 			children = (
 				5EF6DC392FC23F5800183249 /* Config.xcconfig */,
-				6A0903852CD69D9500E70D46 /* intel */,
-				6B00010500000000DEADBEEF /* intelmac */,
+				6A0903852CD69D9500E70D46 /* LoopIOS */,
+				6B00010500000000DEADBEEF /* LoopMac */,
 				5EE7AAD32FB7A82B00062171 /* LoopShare */,
 				6C00020500000000DEADBEEF /* LoopVision */,
 				6A0903842CD69D9500E70D46 /* Products */,
@@ -274,7 +199,7 @@
 				5EE7AADB2FB7A82B00062171 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				6A0903852CD69D9500E70D46 /* intel */,
+				6A0903852CD69D9500E70D46 /* LoopIOS */,
 			);
 			name = Loop;
 			packageProductDependencies = (
@@ -297,8 +222,8 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				6A0903852CD69D9500E70D46 /* intel */,
-				6B00010500000000DEADBEEF /* intelmac */,
+				6A0903852CD69D9500E70D46 /* LoopIOS */,
+				6B00010500000000DEADBEEF /* LoopMac */,
 			);
 			name = LoopMac;
 			packageProductDependencies = (
@@ -321,7 +246,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				6A0903852CD69D9500E70D46 /* intel */,
+				6A0903852CD69D9500E70D46 /* LoopIOS */,
 				6C00020500000000DEADBEEF /* LoopVision */,
 			);
 			name = LoopVision;
@@ -517,12 +442,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = intel/intel.entitlements;
+				CODE_SIGN_ENTITLEMENTS = LoopIOS/LoopIOS.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = intel/Info.plist;
+				INFOPLIST_FILE = LoopIOS/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Loop;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app needs access to your microphone to record voice messages.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We use library to upload your id.";
@@ -558,12 +483,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = intel/intel.entitlements;
+				CODE_SIGN_ENTITLEMENTS = LoopIOS/LoopIOS.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = intel/Info.plist;
+				INFOPLIST_FILE = LoopIOS/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Loop;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app needs access to your microphone to record voice messages.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We use library to upload your id.";
@@ -721,7 +646,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				AUTOMATION_APPLE_EVENTS = NO;
-				CODE_SIGN_ENTITLEMENTS = intelmac/LoopMac.entitlements;
+				CODE_SIGN_ENTITLEMENTS = LoopMac/LoopMac.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -735,16 +660,16 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = YES;
 				EXCLUDED_SOURCE_FILE_NAMES = (
-					"$(SRCROOT)/intel/Base.lproj/*",
-					"$(SRCROOT)/intel/Assets.xcassets",
-					"$(SRCROOT)/intel/Specs/*",
-					"$(SRCROOT)/intel/Specs/**/*",
-					"$(SRCROOT)/intel/sample*.png",
-					"$(SRCROOT)/intel/*.md",
-					"$(SRCROOT)/intel/Specs",
+					"$(SRCROOT)/LoopIOS/Base.lproj/*",
+					"$(SRCROOT)/LoopIOS/Assets.xcassets",
+					"$(SRCROOT)/LoopIOS/Specs/*",
+					"$(SRCROOT)/LoopIOS/Specs/**/*",
+					"$(SRCROOT)/LoopIOS/sample*.png",
+					"$(SRCROOT)/LoopIOS/*.md",
+					"$(SRCROOT)/LoopIOS/Specs",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = intelmac/Info.plist;
+				INFOPLIST_FILE = LoopMac/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Loop;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Loop records your voice when you hold control + fn so it can transcribe and send it to the assistant.";
@@ -778,7 +703,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				AUTOMATION_APPLE_EVENTS = NO;
-				CODE_SIGN_ENTITLEMENTS = intelmac/LoopMac.entitlements;
+				CODE_SIGN_ENTITLEMENTS = LoopMac/LoopMac.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -792,16 +717,16 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = YES;
 				EXCLUDED_SOURCE_FILE_NAMES = (
-					"$(SRCROOT)/intel/Base.lproj/*",
-					"$(SRCROOT)/intel/Assets.xcassets",
-					"$(SRCROOT)/intel/Specs/*",
-					"$(SRCROOT)/intel/Specs/**/*",
-					"$(SRCROOT)/intel/sample*.png",
-					"$(SRCROOT)/intel/*.md",
-					"$(SRCROOT)/intel/Specs",
+					"$(SRCROOT)/LoopIOS/Base.lproj/*",
+					"$(SRCROOT)/LoopIOS/Assets.xcassets",
+					"$(SRCROOT)/LoopIOS/Specs/*",
+					"$(SRCROOT)/LoopIOS/Specs/**/*",
+					"$(SRCROOT)/LoopIOS/sample*.png",
+					"$(SRCROOT)/LoopIOS/*.md",
+					"$(SRCROOT)/LoopIOS/Specs",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = intelmac/Info.plist;
+				INFOPLIST_FILE = LoopMac/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Loop;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Loop records your voice when you hold control + fn so it can transcribe and send it to the assistant.";

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build the intel iOS target and deploy it to a tethered device via ios-deploy.
+Build the Loop iOS target and deploy it to a tethered device via ios-deploy.
 
 Example:
     python scripts/deploy_ios.py --device-id <YOUR_DEVICE_UDID>
@@ -20,11 +20,11 @@ from typing import Iterable, Optional, Tuple
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compile the intel iOS app and push it to a connected iPhone."
+        description="Compile the Loop iOS app and push it to a connected iPhone."
     )
     parser.add_argument(
         "--scheme",
-        default="intel_ios",
+        default="Loop_iOS",
         help="Xcode scheme to build (default: %(default)s).",
     )
     parser.add_argument(
@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--project",
-        default="intel.xcodeproj",
+        default="Loop.xcodeproj",
         help="Path to the .xcodeproj to build (ignored when --workspace is supplied).",
     )
     parser.add_argument(
@@ -71,7 +71,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--product-name",
-        help="Override the expected FULL_PRODUCT_NAME (e.g. intel.app).",
+        help="Override the expected FULL_PRODUCT_NAME (e.g. Loop.app).",
     )
     parser.add_argument(
         "--build-only",

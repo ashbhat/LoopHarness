@@ -1,0 +1,301 @@
+//
+//  SimpleConversationManager.swift
+//  Loop
+//
+//  Created by Ash Bhat on 11/2/24.
+//
+
+import Foundation
+
+// MARK: - Simple Models
+
+struct SimpleConversation: Codable {
+    let id: String
+    var title: String
+    var messages: [SimpleMessage]
+    let createdAt: Date
+    var updatedAt: Date
+
+    init(id: String = UUID().uuidString, title: String, messages: [SimpleMessage] = [], createdAt: Date = Date(), updatedAt: Date = Date()) {
+        self.id = id
+        self.title = title
+        self.messages = messages
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+struct SimpleMessage: Codable {
+    let id: String
+    let role: String
+    let content: String
+    let name: String?
+    let functionName: String?
+    let functionArguments: String?
+    let actions: String?
+    /// JSON-encoded `FileAttachment` (image or PDF). Nil for messages without
+    /// a user-uploaded attachment. Stored as a string so it rides alongside
+    /// the other serialized fields without forcing a Core Data type change.
+    let fileAttachment: String?
+    /// Which model produced the message — "GPT 5.5 Instant", "Apple LLM",
+    /// etc. Optional for backward compatibility with NDJSON entries written
+    /// before this field existed. When nil, callers default to whatever
+    /// `MessageStruct.model` initializes to.
+    let model: String?
+    let createdAt: Date
+
+    init(id: String = UUID().uuidString,
+         role: String,
+         content: String,
+         name: String? = nil,
+         functionName: String? = nil,
+         functionArguments: String? = nil,
+         actions: String? = nil,
+         fileAttachment: String? = nil,
+         model: String? = nil,
+         createdAt: Date = Date()) {
+        self.id = id
+        self.role = role
+        self.content = content
+        self.name = name
+        self.functionName = functionName
+        self.functionArguments = functionArguments
+        self.actions = actions
+        self.fileAttachment = fileAttachment
+        self.model = model
+        self.createdAt = createdAt
+    }
+}
+
+// MARK: - Simple Conversation Manager
+//
+// Public facade. Storage lives in `ConversationFileStore` — one NDJSON file
+// per conversation under iCloud.com.bhat.LoopIOS/Documents/messages/, so iPhone
+// and Mac stay in sync via iCloud Drive.
+//
+// "Current conversation" is no longer a per-device pointer in UserDefaults.
+// `loadLastConversation()` instead returns the *most-recently-updated*
+// conversation in the store — both iPhone and Mac open onto the same one,
+// which is what users expect when bouncing between devices.
+
+class SimpleConversationManager {
+    static let shared = SimpleConversationManager()
+
+    private var store: ConversationFileStore { ConversationFileStore.shared }
+
+    private init() {}
+
+    // MARK: - Current Conversation
+
+    private var _currentConversation: SimpleConversation?
+    var currentConversation: SimpleConversation? {
+        get { return _currentConversation }
+        set {
+            let prevId = _currentConversation?.id
+            _currentConversation = newValue
+            // Post a notification when the *id* changes — re-assigning the
+            // same conversation (e.g. after a save that refreshed the
+            // snapshot) shouldn't churn observers. Surfaces are listening
+            // to this to follow tab switches (Mac terminal pill, etc).
+            if prevId != newValue?.id {
+                NotificationCenter.default.post(
+                    name: .activeConversationDidChange,
+                    object: nil,
+                    userInfo: ["conversationId": newValue?.id as Any]
+                )
+            }
+        }
+    }
+
+    // MARK: - Conversation Operations
+
+    func getAllConversations() -> [SimpleConversation] {
+        return store.allConversations()
+    }
+
+    func getConversation(by id: String) -> SimpleConversation? {
+        return store.conversation(id: id)
+    }
+
+    func createConversation(title: String = "New Conversation") -> SimpleConversation {
+        return store.createConversation(title: title)
+    }
+
+    func saveConversation(_ conversation: SimpleConversation) {
+        store.saveConversation(conversation)
+        if currentConversation?.id == conversation.id {
+            _currentConversation = conversation
+        }
+    }
+
+    func deleteConversation(_ conversation: SimpleConversation) {
+        store.deleteConversation(id: conversation.id)
+        if currentConversation?.id == conversation.id {
+            currentConversation = nil
+        }
+    }
+
+    // MARK: - Message Operations
+
+    func addMessage(_ messageStruct: MessageStruct, to conversation: SimpleConversation) {
+        // Serialize function arguments
+        var functionArgumentsString: String? = nil
+        if let function = messageStruct.function {
+            if let data = try? JSONSerialization.data(withJSONObject: function.arguments),
+               let string = String(data: data, encoding: .utf8) {
+                functionArgumentsString = string
+            }
+        }
+
+        // Serialize actions
+        var actionsString: String? = nil
+        if !messageStruct.actions.isEmpty {
+            let actionStrings = messageStruct.actions.map { action in
+                switch action {
+                case .upload_driver_id:
+                    return "upload_driver_id"
+                }
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: actionStrings),
+               let string = String(data: data, encoding: .utf8) {
+                actionsString = string
+            }
+        }
+
+        // Serialize user-uploaded file attachment, if any. The encoder writes
+        // URLs as plain strings — durable across launches since attachments
+        // live in the workspace.
+        var fileAttachmentString: String? = nil
+        if let attachment = messageStruct.fileAttachment {
+            if let data = try? JSONEncoder().encode(attachment),
+               let string = String(data: data, encoding: .utf8) {
+                fileAttachmentString = string
+            }
+        }
+
+        let simpleMessage = SimpleMessage(
+            id: messageStruct.id,
+            role: messageStruct.role,
+            content: messageStruct.content,
+            name: messageStruct.name,
+            functionName: messageStruct.function?.name,
+            functionArguments: functionArgumentsString,
+            actions: actionsString,
+            fileAttachment: fileAttachmentString,
+            // Persist model attribution so reload paths can show the same
+            // "Apple LLM" / "GPT 5.5 Instant" badge that the live append
+            // path renders. Only meaningful for assistant turns.
+            model: messageStruct.role == "assistant" ? messageStruct.model : nil
+        )
+
+        store.addMessage(simpleMessage, toConversation: conversation.id)
+
+        // Refresh local snapshot of the current conversation so callers see the
+        // appended message immediately without re-fetching.
+        if currentConversation?.id == conversation.id, let refreshed = store.conversation(id: conversation.id) {
+            _currentConversation = refreshed
+        }
+    }
+
+    func getMessages(for conversation: SimpleConversation) -> [SimpleMessage] {
+        return store.messages(forConversation: conversation.id)
+    }
+
+    /// Remove a single message by id from a conversation. Used by Mac escape
+    /// cancellation; mirrors `addMessage` in keeping the in-memory snapshot of
+    /// `currentConversation` consistent with the store.
+    func removeMessage(id messageId: String, from conversation: SimpleConversation) {
+        store.removeMessage(id: messageId, fromConversation: conversation.id)
+        if currentConversation?.id == conversation.id,
+           let refreshed = store.conversation(id: conversation.id) {
+            _currentConversation = refreshed
+        }
+    }
+
+    // MARK: - App Lifecycle
+
+    /// On launch, both iPhone and Mac open the most-recently-updated
+    /// conversation — whichever device touched something last "wins". The
+    /// user can still navigate to older conversations via the sidebar after
+    /// launch; that selection is purely a runtime state and isn't persisted.
+    ///
+    /// May transiently return nil during the brief window before
+    /// `ConversationFileStore` finishes its pass-1 meta enumeration. Callers
+    /// should treat nil as "no conversation available yet" and fall back to
+    /// `createConversation(...)` so the user isn't blocked.
+    func loadLastConversation() -> SimpleConversation? {
+        let conversation = store.mostRecentlyUpdatedConversation()
+        _currentConversation = conversation
+        return conversation
+    }
+
+    func createDefaultConversationIfNeeded() -> SimpleConversation {
+        if let existing = currentConversation {
+            return existing
+        }
+        if let mostRecent = store.mostRecentlyUpdatedConversation() {
+            currentConversation = mostRecent
+            return mostRecent
+        }
+        let conversation = createConversation(title: "General Questions")
+        currentConversation = conversation
+        return conversation
+    }
+
+    func clearCurrentConversation() {
+        currentConversation = nil
+    }
+
+    // MARK: - Conversion Methods
+
+    func messageStruct(from simpleMessage: SimpleMessage) -> MessageStruct {
+        var messageStruct = MessageStruct(
+            id: simpleMessage.id,
+            role: simpleMessage.role,
+            content: simpleMessage.content,
+            name: simpleMessage.name
+        )
+        // Old NDJSON rows have no `model` field — leave the MessageStruct
+        // default in place for those so behavior is unchanged for old chats.
+        if let stored = simpleMessage.model, !stored.isEmpty {
+            messageStruct.model = stored
+        }
+
+        if let functionName = simpleMessage.functionName,
+           let argumentsString = simpleMessage.functionArguments,
+           let argumentsData = argumentsString.data(using: .utf8),
+           let arguments = try? JSONSerialization.jsonObject(with: argumentsData) as? [String: Any] {
+            messageStruct.function = FunctionCallStruct(name: functionName, arguments: arguments)
+        }
+
+        if let actionsString = simpleMessage.actions,
+           let actionsData = actionsString.data(using: .utf8),
+           let actionsArray = try? JSONSerialization.jsonObject(with: actionsData) as? [String] {
+            messageStruct.actions = actionsArray.compactMap { actionString in
+                switch actionString {
+                case "upload_driver_id":
+                    return .upload_driver_id
+                default:
+                    return nil
+                }
+            }
+        }
+
+        if let attachmentString = simpleMessage.fileAttachment,
+           let attachmentData = attachmentString.data(using: .utf8),
+           let attachment = try? JSONDecoder().decode(FileAttachment.self, from: attachmentData) {
+            messageStruct.fileAttachment = attachment
+        }
+
+        return messageStruct
+    }
+
+    func conversationStruct(from simpleConversation: SimpleConversation) -> Conversation {
+        return Conversation(
+            id: simpleConversation.id,
+            title: simpleConversation.title,
+            lastMessage: simpleConversation.messages.last?.content ?? "",
+            timestamp: simpleConversation.updatedAt
+        )
+    }
+}
