@@ -17,8 +17,34 @@
 import AppKit
 import QuartzCore
 
+/// Which spinning-orb prototype is active. Toggle to A/B test.
+enum SpinMode {
+    /// Original behaviour — no rotation.
+    case off
+    /// Option 1: treat each pixel as a point on a 3D sphere (lat/lon → x,y,z),
+    /// rotate around the Y axis every frame. Equator moves fast, poles barely
+    /// move — reads as a spinning globe.
+    case spherical
+    /// Option 2: horizontal rows of pixels drift at speeds proportional to
+    /// cos(latitude). No real 3D math, but the silhouette still feels
+    /// spherical. Cheaper fallback.
+    case parallaxBands
+}
+
 final class AvatarView: NSView {
     enum Mode { case idle, listening, thinking, speaking }
+
+    // MARK: - Spinning-orb prototype toggle & knobs
+
+    /// Change this to switch between prototypes at runtime.
+    static var spinMode: SpinMode = .spherical
+
+    /// Y-axis rotation speed in radians per second.
+    var rotationSpeed: Double = 1.2
+    /// Longitudinal band count for the procedural surface texture.
+    var spinBandCount: Double = 4.0
+    /// Band spatial frequency for parallax mode (grid-unit⁻¹).
+    var parallaxBandFrequency: Double = 0.8
 
     var mode: Mode = .idle {
         didSet {
@@ -199,7 +225,7 @@ final class AvatarView: NSView {
                 // Outgoing mode is drawn first (faded by 1-progress) so the
                 // incoming color composites cleanly on top.
                 if let prevShape = prevShape, let prevColor = prevColor {
-                    let i = intensity(for: prevShape, dx: dx, dy: dy, t: t)
+                    let i = effectiveIntensity(for: prevShape, dx: dx, dy: dy, t: t)
                     let alpha = CGFloat(max(0.0, min(1.0, i)) * (1.0 - blendProgress))
                     if alpha >= 0.05 {
                         ctx.setFillColor(prevColor.withAlphaComponent(alpha).cgColor)
@@ -207,7 +233,7 @@ final class AvatarView: NSView {
                     }
                 }
 
-                let curI = intensity(for: currentShape, dx: dx, dy: dy, t: t)
+                let curI = effectiveIntensity(for: currentShape, dx: dx, dy: dy, t: t)
                 let curAlpha = CGFloat(max(0.0, min(1.0, curI)) * blendProgress)
                 if curAlpha >= 0.05 {
                     ctx.setFillColor(currentColor.withAlphaComponent(curAlpha).cgColor)
@@ -269,6 +295,72 @@ final class AvatarView: NSView {
             }
         }
         return ModeShape(mode: mode, r: r, scale: scale)
+    }
+
+    // MARK: - Spin-aware intensity
+
+    private func effectiveIntensity(for shape: ModeShape, dx: Double, dy: Double, t: TimeInterval) -> Double {
+        let base = intensity(for: shape, dx: dx, dy: dy, t: t)
+        switch Self.spinMode {
+        case .off:
+            return base
+        case .spherical:
+            return sphericalIntensity(base: base, shape: shape, dx: dx, dy: dy, t: t)
+        case .parallaxBands:
+            return parallaxIntensity(base: base, shape: shape, dx: dx, dy: dy, t: t)
+        }
+    }
+
+    /// Option 1: project each pixel onto a sphere, rotate around Y, sample
+    /// a procedural longitude-band texture, and add limb darkening + specular.
+    private func sphericalIntensity(base: Double, shape: ModeShape, dx: Double, dy: Double, t: TimeInterval) -> Double {
+        let r = max(shape.r, 0.01)
+        let d = sqrt(dx * dx + dy * dy)
+        guard d < r else { return base }
+
+        let zSq = r * r - dx * dx - dy * dy
+        let z = sqrt(max(0, zSq))
+
+        let lon = atan2(dx, z) + rotationSpeed * t
+        let lat = asin(max(-1, min(1, dy / r)))
+
+        let pattern = 0.82 + 0.18 * sin(lon * spinBandCount + lat * 1.5)
+
+        // Limb darkening (Lambertian-ish).
+        let cosAngle = z / r
+        let limb = 0.55 + 0.45 * pow(cosAngle, 0.6)
+
+        // Fixed specular highlight — upper-right light, does not rotate.
+        let nx = dx / r, ny = dy / r, nz = z / r
+        let ldot = max(0.0, nx * 0.5 + ny * (-0.5) + nz * 0.7071)
+        let spec = pow(ldot, 16.0) * 0.25
+
+        return base * pattern * limb + spec
+    }
+
+    /// Option 2: each row drifts at cos(latitude) speed. Cheap — one sqrt
+    /// per pixel, no per-pixel trig.
+    private func parallaxIntensity(base: Double, shape: ModeShape, dx: Double, dy: Double, t: TimeInterval) -> Double {
+        let r = max(shape.r, 0.01)
+        let d = sqrt(dx * dx + dy * dy)
+        guard d < r else { return base }
+
+        let lat = dy / r
+        let drift = sqrt(max(0, 1.0 - lat * lat))
+        let shifted = dx + drift * rotationSpeed * t
+        let pattern = 0.82 + 0.18 * sin(shifted * parallaxBandFrequency)
+
+        // Limb darkening approximation.
+        let edgeFrac = d / r
+        let limb = 0.55 + 0.45 * (1.0 - edgeFrac * edgeFrac)
+
+        // Fixed specular highlight (same as spherical).
+        let approxZ = sqrt(max(0, 1.0 - edgeFrac * edgeFrac))
+        let nx = dx / r, ny = dy / r, nz = approxZ
+        let ldot = max(0.0, nx * 0.5 + ny * (-0.5) + nz * 0.7071)
+        let spec = pow(ldot, 16.0) * 0.25
+
+        return base * pattern * limb + spec
     }
 
     private func intensity(for shape: ModeShape, dx: Double, dy: Double, t: TimeInterval) -> Double {
