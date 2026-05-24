@@ -11,8 +11,6 @@ description = "LoopHarness intentional placeholders & example files"
 paths = [
   '''\.env\.example''',
   '''Secrets\.xcconfig\.example''',
-  '''docs/SECRET_AUDIT\.md''',
-  '''docs/PERSONAL_DATA_AUDIT\.md''',
   '''SECURITY\.md''',
 ]
 
