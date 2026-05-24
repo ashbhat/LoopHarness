@@ -50,6 +50,11 @@ final class SettingsVC: UIViewController {
         Section(header: "Help", rows: [
             Row(title: "Replay onboarding", icon: "arrow.counterclockwise") { settings in
                 settings.confirmReplayOnboarding()
+            },
+            Row(title: "View Source Code", icon: "curlybraces") { _ in
+                if let url = URL(string: "https://github.com/theashbhat/LoopHarness") {
+                    UIApplication.shared.open(url)
+                }
             }
         ]),
     ]
@@ -137,7 +142,7 @@ extension SettingsVC: UITableViewDataSource, UITableViewDelegate {
         config.text = row.title
         config.image = UIImage(systemName: row.icon)
         cell.contentConfiguration = config
-        cell.accessoryType = .disclosureIndicator
+        cell.accessoryType = row.title == "View Source Code" ? .none : .disclosureIndicator
         return cell
     }
 
