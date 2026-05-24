@@ -5,8 +5,9 @@
 //  Mac counterpart to iOS's IntegrationsVC. Lists the third-party services
 //  Loop can pull context from / take action in: Google Calendar (live via
 //  EventKit — covers any calendar account the user has added in macOS
-//  System Settings → Internet Accounts), plus stubs for Notion, Gmail, and
-//  Slack so the Mac surface tells the same story as iPhone.
+//  System Settings → Internet Accounts), Notion (token-backed via ntn_…
+//  integration token in Keychain), and Slack (token-backed via xoxp- user
+//  token in Keychain). Gmail is stubbed as coming soon.
 //
 //  Opened from Loop ▸ Settings ▸ Integrations…. Reuses the shared
 //  CalendarSkill so authorization state is consistent with whatever the
@@ -53,7 +54,6 @@ fileprivate struct Integration {
         case connected
         case notConnected
         case denied              // user said no in System Settings
-        case alwaysOn            // server-side, no user action needed
         case comingSoon
     }
     let title: String
@@ -160,14 +160,7 @@ fileprivate final class IntegrationsListViewController: NSViewController, NSTabl
                 status: calendarStatus,
                 handler: { vc in vc.handleCalendarTap() }
             ),
-            Integration(
-                title: "Notion",
-                subtitle: "Always on · routed through Loop's backend",
-                icon: "note.text",
-                tint: .labelColor,
-                status: .alwaysOn,
-                handler: nil
-            ),
+            notionIntegration(),
             Integration(
                 title: "Gmail",
                 subtitle: "Coming soon · OAuth wiring in progress",
@@ -231,6 +224,39 @@ fileprivate final class IntegrationsListViewController: NSViewController, NSTabl
             SettingsWindowController.shared.showKeys(selecting: .devinOrgID)
         default:
             break
+        }
+    }
+
+    /// Notion is token-backed — connection state is "did the user paste an
+    /// ntn_… integration token into Settings → Keys → Notion Integration
+    /// Token?". Mirrors the Slack pattern below.
+    private func notionIntegration() -> Integration {
+        let hasToken = !((KeyStore.shared.value(for: .notionIntegrationToken) ?? "").isEmpty)
+        return Integration(
+            title: "Notion",
+            subtitle: hasToken
+                ? "Connected · Notion integration token"
+                : "Click to paste your Notion integration token",
+            icon: "note.text",
+            tint: .labelColor,
+            status: hasToken ? .connected : .notConnected,
+            handler: { vc in vc.handleNotionTap() }
+        )
+    }
+
+    fileprivate func handleNotionTap() {
+        let hasToken = !((KeyStore.shared.value(for: .notionIntegrationToken) ?? "").isEmpty)
+        if hasToken {
+            let alert = NSAlert()
+            alert.messageText = "Notion connected"
+            alert.informativeText = "Loop is connected to Notion via an integration token. You can replace or remove the token in Settings → Keys."
+            alert.addButton(withTitle: "Edit Token")
+            alert.addButton(withTitle: "Done")
+            if alert.runModal() == .alertFirstButtonReturn {
+                SettingsWindowController.shared.showKeys(selecting: .notionIntegrationToken)
+            }
+        } else {
+            SettingsWindowController.shared.showKeys(selecting: .notionIntegrationToken)
         }
     }
 
@@ -319,8 +345,8 @@ fileprivate final class IntegrationsListViewController: NSViewController, NSTabl
         return IntegrationCellView(integration: integrations[row])
     }
 
-    /// Coming-soon and always-on rows have no handler; block selection so the
-    /// row doesn't visually highlight when the user clicks an inert item.
+    /// Coming-soon rows have no handler; block selection so the row doesn't
+    /// visually highlight when the user clicks an inert item.
     func tableView(_ tableView: NSTableView, selectionIndexesForProposedSelection proposedSelectionIndexes: IndexSet) -> IndexSet {
         return IndexSet(proposedSelectionIndexes.filter { integrations[$0].handler != nil })
     }
@@ -399,7 +425,7 @@ fileprivate final class IntegrationCellView: NSTableCellView {
 
     private static func accessoryView(for status: Integration.Status) -> NSView {
         switch status {
-        case .connected, .alwaysOn:
+        case .connected:
             let dot = NSImageView(image: NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: "Connected") ?? NSImage())
             dot.contentTintColor = .systemGreen
             return dot
