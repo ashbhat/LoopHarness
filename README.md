@@ -85,6 +85,34 @@ security policy. Secret scanning runs in CI on every push
 (`.github/workflows/secret-scan.yml`). To report a vulnerability, see
 `SECURITY.md`.
 
+## Integrations
+
+### Higgsfield — AI video generation
+
+Loop can generate cinematic videos through the
+[Higgsfield Cloud](https://cloud.higgsfield.ai/) API. The integration
+surfaces three agent tools:
+
+| Tool | Purpose |
+|------|---------|
+| `higgsfield_generate_video` | Start a generation job (returns a `request_id` immediately). |
+| `higgsfield_check_video` | Poll a job's status; returns `video_url` when complete. |
+| `higgsfield_list_models` | List available models (Sora 2, Veo 3, Kling 2.1, Seedance, DoP, Flux, Soul). |
+
+**Setup:** paste your `KEY_ID:KEY_SECRET` credentials (from
+*cloud.higgsfield.ai → API Keys*) into **Settings → Keys → Higgsfield**.
+The key is stored in the Keychain and never leaves your device except to
+Higgsfield's servers.
+
+**Async job pattern:** generation is asynchronous — `higgsfield_generate_video`
+returns instantly with a `request_id`. The agent then polls
+`higgsfield_check_video` until the status reaches `completed` (or a terminal
+state like `failed` / `nsfw`). Pricing is credit-based on Higgsfield Cloud;
+failed or moderation-flagged jobs are automatically refunded.
+
+If the API key is not set, any Higgsfield tool call returns
+`{"error": "higgsfield_not_connected"}` with a hint to configure the key.
+
 ## Status
 
 Early open-source release. APIs and structure will change. Contributions and

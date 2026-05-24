@@ -43,6 +43,7 @@ final class KeyStore {
         case xAPISecret             = "X_API_SECRET"
         case xAccessToken           = "X_ACCESS_TOKEN"
         case xAccessTokenSecret     = "X_ACCESS_TOKEN_SECRET"
+        case higgsfield             = "HIGGSFIELD_API_KEY"
 
         /// User-facing label shown in Settings.
         var displayName: String {
@@ -67,6 +68,7 @@ final class KeyStore {
             case .xAPISecret:             return "X API Secret"
             case .xAccessToken:           return "X Access Token"
             case .xAccessTokenSecret:     return "X Access Token Secret"
+            case .higgsfield:             return "Higgsfield"
             }
         }
 
@@ -93,6 +95,7 @@ final class KeyStore {
             case .xAPISecret:             return "OAuth 1.0a consumer secret — shown once when you regenerate the API key"
             case .xAccessToken:           return "User-level access token with read+write permission from developer.x.com"
             case .xAccessTokenSecret:     return "User-level access token secret — shown once at generation time"
+            case .higgsfield:             return "KEY_ID:KEY_SECRET credentials from cloud.higgsfield.ai → API Keys. Used for cinematic video generation (Sora, Veo, Kling, etc.)."
             }
         }
     }
@@ -104,7 +107,7 @@ final class KeyStore {
     /// either add a new `Service` case here or extend an existing one's `keys`.
     enum Service: String, CaseIterable {
         case openAI, anthropic, kimi, deepgram, elevenLabs, exa
-        case cursor, devin
+        case cursor, devin, higgsfield
         case github, slack, notion, obsidian
         case twitter
 
@@ -119,6 +122,7 @@ final class KeyStore {
             case .exa:        return "Exa"
             case .cursor:     return "Cursor"
             case .devin:      return "Devin"
+            case .higgsfield: return "Higgsfield"
             case .github:     return "GitHub"
             case .slack:      return "Slack"
             case .notion:     return "Notion"
@@ -141,6 +145,7 @@ final class KeyStore {
             case .exa:        return "Web search + answer skill"
             case .cursor:     return "Dispatch coding tasks to Cursor cloud agents (opens PRs)"
             case .devin:      return "Dispatch coding tasks to Devin cloud agents (opens PRs, live transcript)"
+            case .higgsfield: return "Cinematic video generation via Higgsfield Cloud (Sora 2, Veo 3, Kling, Seedance, etc.)"
             case .github:     return "Review/merge PRs, open PRs and issues, browse repos and notifications"
             case .slack:      return "Read channels/DMs/mentions, search, and send messages with confirmation"
             case .notion:     return "Read and write Notion pages and databases"
@@ -164,6 +169,7 @@ final class KeyStore {
             case .exa:        return [.exa]
             case .cursor:     return [.cursor]
             case .devin:      return [.devin, .devinOrgID]
+            case .higgsfield: return [.higgsfield]
             case .github:     return [.githubPAT, .githubBaseURL]
             case .slack:      return [.slackUserToken]
             case .notion:     return [.notionIntegrationToken]

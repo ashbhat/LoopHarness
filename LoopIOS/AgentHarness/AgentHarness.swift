@@ -131,6 +131,7 @@ final class AgentHarness {
         #if canImport(HealthKit) && os(iOS)
         catalog.append(("Apple Health", "Read-only access to steps, distance, workouts, heart rate, sleep, body mass"))
         #endif
+        catalog.append(("Higgsfield", "Cinematic video generation via Higgsfield Cloud (Sora 2, Veo 3, Kling, etc.)"))
         return catalog
     }()
 
@@ -164,6 +165,7 @@ final class AgentHarness {
         #if canImport(HealthKit) && os(iOS)
         fragments.append(HealthSkill.systemPromptFragment)
         #endif
+        fragments.append(HiggsFieldSkill.systemPromptFragment)
         self.toolsDoc = fragments.joined(separator: "\n\n")
         self.staticToolsDocLength = toolsDoc.count
         self.staticToolSchemasCount = toolSchemas.count

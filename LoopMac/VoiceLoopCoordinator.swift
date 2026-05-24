@@ -850,6 +850,9 @@ The current date and time is \(now).
         if CursorSkill.shared.handles(functionName: function.name) {
             CursorSkill.shared.handle(functionCall: function, completion: cont); return
         }
+        if HiggsFieldSkill.shared.handles(functionName: function.name) {
+            HiggsFieldSkill.shared.handle(functionCall: function, completion: cont); return
+        }
         // Dynamic (user-authored JS) skills last — hot-loaded so the
         // registry is the source of truth for what's currently available.
         if DynamicSkillRegistry.shared.handles(functionName: function.name) {
@@ -879,6 +882,7 @@ The current date and time is \(now).
         if let s = SubAgentSkill.shared.statusText(for: call) { return s }
         if let s = DevinSkill.shared.statusText(for: call) { return s }
         if let s = CursorSkill.shared.statusText(for: call) { return s }
+        if let s = HiggsFieldSkill.shared.statusText(for: call) { return s }
         if let s = DynamicSkillRegistry.shared.statusText(for: call) { return s }
         return "running \(call.name.replacingOccurrences(of: "_", with: " "))"
     }

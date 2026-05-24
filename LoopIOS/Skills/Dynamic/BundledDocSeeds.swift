@@ -111,7 +111,8 @@ skill follows the same shape:
 
 Bundled skills include: Notion, Scheduler, Web search (Exa), URL fetch,
 Self-Improvement, File System, Spec Builder, Location, Image, Obsidian,
-Calendar, Music, Skill Builder, Sub-Agent, and Integrations. The user (or the
+Calendar, Music, Skill Builder, Sub-Agent, Integrations, Cursor, Devin, and
+Higgsfield (cinematic video generation). The user (or the
 agent) can also author new skills in JavaScript at runtime — those hot-load
 from `Workspace/Skills/` and don't require a rebuild.
 
