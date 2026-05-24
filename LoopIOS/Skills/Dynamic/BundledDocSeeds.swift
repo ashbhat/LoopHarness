@@ -159,8 +159,8 @@ lock-step.
 
 ## Open-source repository
 
-Loop's own source code is open-sourced at **ashbhat/loopharness**
-(https://github.com/ashbhat/loopharness). When the user asks how Loop works
+Loop's own source code is open-sourced at **theashbhat/LoopHarness**
+(https://github.com/theashbhat/LoopHarness). When the user asks how Loop works
 internally, or wants to inspect specific implementation details, use the
 GitHub skill tools to read the code directly:
 

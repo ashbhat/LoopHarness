@@ -713,7 +713,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc fileprivate func openSourceRepo(_ sender: Any?) {
-        if let url = URL(string: "https://github.com/ashbhat/loopharness") {
+        if let url = URL(string: "https://github.com/theashbhat/LoopHarness") {
             NSWorkspace.shared.open(url)
         }
     }
