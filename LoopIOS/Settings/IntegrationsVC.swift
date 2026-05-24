@@ -5,11 +5,13 @@
 //  Settings → Integrations: list of third-party services Loop can pull
 //  context from / take actions in. v1 surfaces Google Calendar (live via
 //  Apple's EventKit — covers every account the user has added to iOS
-//  Settings → Calendars: Google, iCloud, Exchange, Office365), and stubs
-//  for Notion, Gmail, and Slack so users can see what's coming.
+//  Settings → Calendars: Google, iCloud, Exchange, Office365), Notion
+//  (token-backed via ntn_… integration token in Keychain), and Slack
+//  (token-backed via xoxp- user token in Keychain). Gmail is stubbed as
+//  coming soon.
 //
-//  When the user taps an active row Loop requests the relevant permission
-//  (or surfaces a Settings.app deep link if access was previously denied).
+//  When the user taps an active row Loop requests the relevant permission,
+//  opens the key editor, or surfaces a Settings.app deep link.
 //  Coming-soon rows are non-selectable.
 //
 
@@ -19,15 +21,13 @@ import EventKit
 final class IntegrationsVC: UIViewController {
 
     /// Row model so the same cell renderer handles "Connected" (Google
-    /// Calendar via EventKit), "Always on" (Notion, which routes through
-    /// the backend's existing Bearer auth), and "Coming soon" (Slack/Gmail,
-    /// which still need OAuth wiring).
+    /// Calendar via EventKit, Notion via integration token, Slack via user
+    /// token), and "Coming soon" (Gmail, which still needs OAuth wiring).
     private struct Integration {
         enum Status {
             case connected
             case notConnected
             case denied              // user said no in iOS settings
-            case alwaysOn            // server-side, no user action needed
             case comingSoon
         }
         let title: String
@@ -113,14 +113,7 @@ final class IntegrationsVC: UIViewController {
                 status: calendarStatus,
                 handler: { vc in vc.handleCalendarTap() }
             ),
-            Integration(
-                title: "Notion",
-                subtitle: "Always on · routed through Loop's backend",
-                icon: "note.text",
-                tint: .label,
-                status: .alwaysOn,
-                handler: nil
-            ),
+            notionIntegration(),
             Integration(
                 title: "Gmail",
                 subtitle: "Coming soon · OAuth wiring in progress",
@@ -211,6 +204,49 @@ final class IntegrationsVC: UIViewController {
         // single panel; `focusing:` lands the user on the specific field they
         // came to set (api key vs. org id) without losing the other field.
         stack.append(KeyEditVC(focusing: key))
+        nav.setViewControllers(stack, animated: true)
+    }
+
+    /// Notion is token-backed — connection state is "did the user paste an
+    /// ntn_… integration token into Settings → Keys → Notion Integration
+    /// Token?". Mirrors the Slack pattern below.
+    private func notionIntegration() -> Integration {
+        let hasToken = !((KeyStore.shared.value(for: .notionIntegrationToken) ?? "").isEmpty)
+        return Integration(
+            title: "Notion",
+            subtitle: hasToken
+                ? "Connected · Notion integration token"
+                : "Tap to paste your Notion integration token",
+            icon: "note.text",
+            tint: .label,
+            status: hasToken ? .connected : .notConnected,
+            handler: { vc in vc.handleNotionTap() }
+        )
+    }
+
+    private func handleNotionTap() {
+        let hasToken = !((KeyStore.shared.value(for: .notionIntegrationToken) ?? "").isEmpty)
+        if hasToken {
+            let alert = UIAlertController(
+                title: "Notion connected",
+                message: "Loop is connected to Notion via an integration token. You can replace or remove the token in Settings → Keys → Notion Integration Token.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "Edit Token", style: .default) { [weak self] _ in
+                self?.pushNotionKeyEditor()
+            })
+            alert.addAction(UIAlertAction(title: "Done", style: .cancel))
+            present(alert, animated: true)
+        } else {
+            pushNotionKeyEditor()
+        }
+    }
+
+    private func pushNotionKeyEditor() {
+        guard let nav = navigationController else { return }
+        var stack = nav.viewControllers
+        stack.append(KeysVC())
+        stack.append(KeyEditVC(focusing: .notionIntegrationToken))
         nav.setViewControllers(stack, animated: true)
     }
 
@@ -320,7 +356,7 @@ extension IntegrationsVC: UITableViewDataSource, UITableViewDelegate {
         cell.contentConfiguration = config
 
         switch integration.status {
-        case .connected, .alwaysOn:
+        case .connected:
             let dot = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
             dot.tintColor = .systemGreen
             cell.accessoryView = dot
