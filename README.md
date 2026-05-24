@@ -79,9 +79,11 @@ add them to the same `Secrets.xcconfig` (see comments in
 
 ## Security & privacy
 
-This repository contains no live credentials. Secret scanning runs in CI on
-every push (`.github/workflows/secret-scan.yml`). To report a vulnerability,
-see [`SECURITY.md`](SECURITY.md).
+This repository contains no live credentials. Keys are entered in-app and
+stored in the Apple Keychain; see [`SECURITY.md`](SECURITY.md) for the full
+security policy. Secret scanning runs in CI on every push
+(`.github/workflows/secret-scan.yml`). To report a vulnerability, see
+`SECURITY.md`.
 
 ## Status
 
