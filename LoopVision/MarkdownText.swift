@@ -25,6 +25,8 @@ struct MarkdownText: View {
                     Text(Self.attributed(prose))
                 case .table(let table):
                     MarkdownTableView(table: table)
+                case .codeBlock(let block):
+                    MarkdownCodeBlockView(block: block)
                 }
             }
         }
@@ -119,4 +121,49 @@ private struct MarkdownTableView: View {
         case .right:  return .trailing
         }
     }
+}
+
+/// Renders a fenced code block as monospaced text inside a rounded,
+/// tinted container with an optional language label.
+private struct MarkdownCodeBlockView: View {
+    let block: MarkdownCodeBlock
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Text(block.code)
+                .font(.system(.subheadline, design: .monospaced))
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let lang = block.language, !lang.isEmpty {
+                Text(lang)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 6)
+                    .padding(.trailing, 10)
+            }
+        }
+        .background(Color.secondary.opacity(0.12),
+                     in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+// MARK: - Previews
+
+#Preview("Markdown with code block") {
+    MarkdownText(markdown: """
+    Here's a Swift example:
+
+    ```swift
+    struct Greeting {
+        let name: String
+        var message: String {
+            "Hello, \\(name)!"
+        }
+    }
+    ```
+
+    And some `inline code` too.
+    """)
+    .padding()
 }
