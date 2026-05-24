@@ -54,7 +54,7 @@ scripts/               Python helper/deploy utilities
 Loop.xcodeproj         the Xcode project (app product name: "Loop")
 ```
 
-See [`docs/`](docs/) for audit reports and license rationale.
+See [`docs/`](docs/) for license rationale.
 
 ## Setup
 
@@ -79,11 +79,9 @@ add them to the same `Secrets.xcconfig` (see comments in
 
 ## Security & privacy
 
-This repository was built from a sanitized export — see
-[`SECURITY.md`](SECURITY.md) and [`docs/SECRET_AUDIT.md`](docs/SECRET_AUDIT.md).
-It contains no live credentials. Secret scanning runs in CI on every push
-(`.github/workflows/secret-scan.yml`). To report a vulnerability, see
-`SECURITY.md`.
+This repository contains no live credentials. Secret scanning runs in CI on
+every push (`.github/workflows/secret-scan.yml`). To report a vulnerability,
+see [`SECURITY.md`](SECURITY.md).
 
 ## Status
 
