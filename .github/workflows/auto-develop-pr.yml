@@ -34,10 +34,14 @@ jobs:
           echo "count=$count" >> "$GITHUB_OUTPUT"
           echo "develop is $count commits ahead of main"
 
-      - name: Compute date (America/Los_Angeles)
+      - name: Compute title (America/Los_Angeles)
         if: steps.ahead.outputs.count != '0'
         id: date
-        run: echo "today=$(TZ=America/Los_Angeles date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          pretty=$(TZ=America/Los_Angeles date +'%a, %b %-d, %Y')
+          version=$(TZ=America/Los_Angeles date +'v%-m.%-d.%y')
+          echo "title=D2M: ${pretty} (${version})" >> "$GITHUB_OUTPUT"
 
       - name: Collect diff and log
         if: steps.ahead.outputs.count != '0'
@@ -118,7 +122,7 @@ jobs:
         if: steps.ahead.outputs.count != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TITLE: ${{ steps.date.outputs.today }}
+          TITLE: ${{ steps.date.outputs.title }}
         run: |
           set -euo pipefail
           existing=$(gh pr list --base main --head develop --state open --json number --jq '.[0].number // ""')

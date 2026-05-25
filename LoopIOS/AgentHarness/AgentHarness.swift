@@ -103,36 +103,39 @@ final class AgentHarness {
     /// drawer's "Skills" tab. This intentionally mirrors the `systemPromptFragment`
     /// list assembled in `init()` below (same order) — when you add a skill
     /// there, add its display row here so the sidebar stays in sync.
-    static let bundledSkillCatalog: [(name: String, summary: String)] = [
-        ("Notion",           "Read and write Notion pages and databases"),
-        ("Slack",            "Read channels/DMs/mentions, search, and send messages with confirmation"),
-        ("Scheduler",        "Schedule reminders and recurring background tasks"),
-        ("Web Search",       "Search the web for up-to-date information"),
-        ("URL Fetch",        "Fetch and read a single web page (no API key)"),
-        ("Git",              "Clone, pull, and check status of git repositories"),
-        ("GitHub",           "Review/merge/comment on PRs, open PRs and issues, browse repos and notifications"),
-        ("Self-Improvement", "Update the agent's own SOUL / USER / AGENTS docs"),
-        ("File System",      "Browse and edit files in the workspace"),
-        ("Spec Builder",     "Draft execution specs from a goal"),
-        ("Location",         "Look up the device's current location"),
-        ("Image",            "Generate images from a text prompt"),
-        ("PDF",              "Generate a clean, page-aware PDF from a markdown document"),
-        ("Obsidian",         "Read and write the Obsidian vault"),
-        ("Calendar",         "Read and create calendar events"),
-        ("Music",            "Search and control Apple Music"),
-        ("Skill Builder",    "Author new local skills on the fly"),
-        ("Sub-Agent",        "Spawn a focused sub-agent for a subtask"),
-        ("Integration",      "Manage third-party service connections"),
-        ("Cursor",           "Dispatch coding tasks to Cursor cloud agents (opens PRs)"),
-        ("Devin",            "Dispatch coding tasks to Devin cloud agents (opens PRs, live transcript)"),
-        ("X (Twitter)",      "Post tweets to X (Twitter) with confirmation"),
+    static let bundledSkillCatalog: [(name: String, summary: String)] = {
+        var catalog: [(name: String, summary: String)] = [
+            ("Notion",           "Read and write Notion pages and databases"),
+            ("Slack",            "Read channels/DMs/mentions, search, and send messages with confirmation"),
+            ("Scheduler",        "Schedule reminders and recurring background tasks"),
+            ("Web Search",       "Search the web for up-to-date information"),
+            ("URL Fetch",        "Fetch and read a single web page (no API key)"),
+            ("Git",              "Clone, pull, and check status of git repositories"),
+            ("GitHub",           "Review/merge/comment on PRs, open PRs and issues, browse repos and notifications"),
+            ("Self-Improvement", "Update the agent's own SOUL / USER / AGENTS docs"),
+            ("File System",      "Browse and edit files in the workspace"),
+            ("Spec Builder",     "Draft execution specs from a goal"),
+            ("Location",         "Look up the device's current location"),
+            ("Image",            "Generate images from a text prompt"),
+            ("PDF",              "Generate a clean, page-aware PDF from a markdown document"),
+            ("Obsidian",         "Read and write the Obsidian vault"),
+            ("Calendar",         "Read and create calendar events"),
+            ("Music",            "Search and control Apple Music"),
+            ("Skill Builder",    "Author new local skills on the fly"),
+            ("Sub-Agent",        "Spawn a focused sub-agent for a subtask"),
+            ("Integration",      "Manage third-party service connections"),
+            ("Cursor",           "Dispatch coding tasks to Cursor cloud agents (opens PRs)"),
+            ("Devin",            "Dispatch coding tasks to Devin cloud agents (opens PRs, live transcript)"),
+            ("X (Twitter)",      "Post tweets to X (Twitter) with confirmation"),
+        ]
         #if canImport(HealthKit) && os(iOS)
-        ("Apple Health",     "Read-only access to steps, distance, workouts, heart rate, sleep, body mass"),
+        catalog.append(("Apple Health", "Read-only access to steps, distance, workouts, heart rate, sleep, body mass"))
         #endif
-    ]
+        return catalog
+    }()
 
     private init() {
-        self.toolsDoc = [
+        var fragments: [String] = [
             NotionSkill.systemPromptFragment,
             SlackSkill.systemPromptFragment,
             SchedulerSkill.systemPromptFragment,
@@ -157,10 +160,11 @@ final class AgentHarness {
             CursorSkill.systemPromptFragment,
             DevinSkill.systemPromptFragment,
             TwitterSkill.systemPromptFragment,
-            #if canImport(HealthKit) && os(iOS)
-            HealthSkill.systemPromptFragment,
-            #endif
-        ].joined(separator: "\n\n")
+        ]
+        #if canImport(HealthKit) && os(iOS)
+        fragments.append(HealthSkill.systemPromptFragment)
+        #endif
+        self.toolsDoc = fragments.joined(separator: "\n\n")
         self.staticToolsDocLength = toolsDoc.count
         self.staticToolSchemasCount = toolSchemas.count
 
@@ -205,6 +209,15 @@ final class AgentHarness {
         // AVAudioSession.interruption) exist before TTS or recording start
         // posting events. Idempotent — calling shared a second time is fine.
         Task { @MainActor in MusicController.bootstrap() }
+
+        // Touch the HealthKit manager so its init-time backfill of the
+        // "user has been prompted" flag runs before the agent fields a
+        // health query. Without this, a user who granted access in a
+        // prior app version would see the first query incorrectly fail
+        // with health_not_authorized.
+        #if canImport(HealthKit) && os(iOS)
+        _ = HealthKitManager.shared
+        #endif
     }
 
     // MARK: - Dynamic skill integration
