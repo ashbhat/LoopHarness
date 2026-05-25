@@ -149,7 +149,7 @@ final class OpenAIChat {
     /// Reused by sibling OpenAI-compatible clients (KimiChat) — the wire
     /// shape is identical so there's no point duplicating the mapping.
     static func wireMessages(from messages: [MessageStruct]) -> [[String: Any]] {
-        return sanitizeToolCallPairing(messages).map { m -> [String: Any] in
+        return sanitizeToolCallPairing(stripUIPlaceholders(messages)).map { m -> [String: Any] in
             if m.role == "function" {
                 if let toolCallId = m.callId, !toolCallId.isEmpty {
                     return [
@@ -239,6 +239,25 @@ final class OpenAIChat {
                 out["content"] = content
             }
             return out
+        }
+    }
+
+    /// Drop synthetic UI-marker messages (the `image-<id>` / `pdf-<id>`
+    /// placeholders that ImageSkill / PDFSkill insert into the store so the
+    /// chat cell can render a thumbnail). They carry no model-readable
+    /// content — the tool result already told the model what was generated —
+    /// and they sit between the assistant `tool_calls` turn and the
+    /// `role:"function"` result, which would otherwise break OpenAI's
+    /// strict pairing rule and trigger a "tool message without preceding
+    /// tool_calls" 400.
+    private static func stripUIPlaceholders(_ messages: [MessageStruct]) -> [MessageStruct] {
+        return messages.filter { m in
+            guard m.role == "assistant" else { return true }
+            // Identifier prefix is the authoritative signal — set by the
+            // skill that inserted the placeholder, not derivable from any
+            // user-controlled content.
+            if m.id.hasPrefix("image-") || m.id.hasPrefix("pdf-") { return false }
+            return true
         }
     }
 

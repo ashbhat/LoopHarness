@@ -1,0 +1,296 @@
+@page {
+    size: Letter;
+    margin: 1.0in 1.1in 1.1in 1.1in;
+    @bottom-left {
+        content: string(doc-title);
+        font-family: "Times New Roman", "Times", Georgia, serif;
+        font-size: 8.5pt;
+        font-style: italic;
+        color: #6e6e72;
+    }
+    @bottom-right {
+        content: counter(page) " of " counter(pages);
+        font-family: "Times New Roman", "Times", Georgia, serif;
+        font-size: 8.5pt;
+        color: #6e6e72;
+    }
+}
+
+* { box-sizing: border-box; -webkit-print-color-adjust: exact; }
+
+html, body {
+    font-family: "Times New Roman", "Times", Georgia, serif;
+    font-size: 11pt;
+    line-height: 1.45;
+    color: #0c0c0d;
+    margin: 0;
+    padding: 0;
+    text-rendering: geometricPrecision;
+    -webkit-font-smoothing: subpixel-antialiased;
+}
+
+/* WKWebView's createPDF ignores `@page` margins — Apple's renderer does
+   pagination but doesn't honor the print box. Body padding is the only
+   margin source we can rely on, so the page rule above stays in case a
+   future iOS picks it up but the visual margin is enforced here. */
+body {
+    padding: 0.9in 1.0in 1.0in 1.0in;
+}
+
+/* Cover collapses into a centered title block at the top of page 1 —
+   no separate cover page. Contracts open straight into content. */
+.cover {
+    padding: 0 0 22pt 0;
+    margin: 0 0 18pt 0;
+    border-bottom: 0;
+    text-align: center;
+    page-break-after: avoid;
+    break-after: avoid;
+}
+.cover-eyebrow { display: none; }
+.cover-meta { display: none; }
+.cover-title {
+    font-family: "Times New Roman", "Times", Georgia, serif;
+    font-size: 16pt;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #0c0c0d;
+    margin: 0;
+    line-height: 1.2;
+}
+.doc-title { string-set: doc-title content(); }
+
+.body {
+    padding: 0;
+}
+
+/* Justified prose is the default for contract templates. Hyphenate so
+   long legal terms break cleanly inside narrow column widths. */
+.body p {
+    margin: 0 0 9pt 0;
+    text-align: justify;
+    text-justify: inter-word;
+    hyphens: auto;
+    -webkit-hyphens: auto;
+    orphans: 3;
+    widows: 3;
+}
+
+/* First body paragraph rendered as italic + centered is the "subtitle"
+   convention — e.g. "Pursuant to the Health Insurance Portability...".
+   The model writes `*…*` on a line of its own immediately after the
+   title and the styling picks it up automatically. */
+.body > p:first-child em:only-child {
+    display: block;
+    text-align: center;
+    font-style: italic;
+    font-size: 11pt;
+    color: #2c2c2e;
+    margin: -8pt 0 18pt 0;
+}
+
+/* Major section breaks: "RECITALS", "GENERAL TERMS", "SCHEDULE A", etc.
+   Centered, all-caps, with an underline rule beneath. Convention: the
+   model writes these as `# Heading` (h1) — top-level markdown headings
+   are reserved for these major breaks (the document title comes from
+   the `title` arg, not body markdown). */
+.body h1 {
+    font-family: "Times New Roman", "Times", Georgia, serif;
+    font-size: 13pt;
+    font-weight: 700;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #0c0c0d;
+    margin: 26pt auto 14pt auto;
+    padding-bottom: 4pt;
+    border-bottom: 1px solid #0c0c0d;
+    width: fit-content;
+    max-width: 100%;
+    page-break-after: avoid;
+    break-after: avoid-page;
+    page-break-inside: avoid;
+}
+
+/* Section headings: "1. Definitions", "2. Obligations of Business
+   Associate", etc. Numbering is written by the model in the heading
+   text — we don't auto-number with CSS counters because contracts
+   often skip / restart numbering and we don't want surprises. */
+h2 {
+    font-family: "Times New Roman", "Times", Georgia, serif;
+    font-size: 12pt;
+    font-weight: 700;
+    color: #0c0c0d;
+    margin: 22pt 0 8pt 0;
+    page-break-after: avoid;
+    break-after: avoid-page;
+    page-break-inside: avoid;
+}
+
+/* Subsections: "2.1. General Use and Disclosure Restrictions" */
+h3 {
+    font-family: "Times New Roman", "Times", Georgia, serif;
+    font-size: 11pt;
+    font-weight: 700;
+    font-style: normal;
+    color: #1c1c1e;
+    margin: 14pt 0 4pt 0;
+    padding-left: 12pt;
+    page-break-after: avoid;
+    break-after: avoid-page;
+}
+
+/* Inline labels — "Effective Date:", "WHEREAS,", "NOW, THEREFORE,"
+   etc. — get bolded via the model's `**…**` prefix. The base styling
+   is just normal bold so they read as in-paragraph emphasis, not as a
+   heading. */
+strong {
+    font-weight: 700;
+    color: #0c0c0d;
+}
+
+em {
+    font-style: italic;
+}
+
+/* Lettered ordered lists: "a. Applicable Laws means…", "b. Breach…".
+   Contracts traditionally use lower-alpha at the first level and
+   lower-roman for nested. CSS counters give us this without the model
+   having to handle the letter prefixes manually. */
+ol {
+    list-style-type: lower-alpha;
+    padding-left: 26pt;
+    margin: 4pt 0 12pt 0;
+}
+ol ol {
+    list-style-type: lower-roman;
+    padding-left: 24pt;
+    margin: 6pt 0 6pt 0;
+}
+ol ol ol {
+    list-style-type: decimal;
+}
+ol li {
+    margin: 0 0 6pt 0;
+    padding-left: 4pt;
+    text-align: justify;
+    text-justify: inter-word;
+    hyphens: auto;
+    -webkit-hyphens: auto;
+    page-break-inside: avoid;
+    break-inside: avoid-page;
+}
+ol li::marker {
+    font-weight: 600;
+    color: #0c0c0d;
+}
+
+/* Unordered list — used rarely in contracts but supported for things
+   like "the following representations:". Use a quiet dash marker so
+   it doesn't compete with the lettered sub-clauses. */
+ul {
+    list-style-type: none;
+    padding-left: 24pt;
+    margin: 4pt 0 12pt 0;
+}
+ul li {
+    position: relative;
+    margin: 0 0 5pt 0;
+    text-align: justify;
+    hyphens: auto;
+}
+ul li::before {
+    content: "—";
+    position: absolute;
+    left: -18pt;
+    color: #6e6e72;
+}
+
+/* Blockquote — used for inline preamble blocks ("WHEREAS…" style on
+   templates that don't bold-prefix them). Subtle border, italic copy. */
+blockquote {
+    margin: 12pt 0;
+    padding: 4pt 16pt;
+    border-left: 2px solid #b0b0b5;
+    color: #1c1c1e;
+    font-style: italic;
+    page-break-inside: avoid;
+    break-inside: avoid-page;
+}
+
+a {
+    color: #0c0c0d;
+    text-decoration: none;
+    border-bottom: 0.5pt solid #b0b0b5;
+}
+
+hr {
+    border: 0;
+    border-top: 0.5pt solid #d2d2d7;
+    margin: 22pt 0;
+}
+
+/* Tables — used for the signature block at the end. Borderless so two
+   columns of "Name / Title / Date" lines read as facing pages rather
+   than a data grid. If a real data table is needed inside a contract,
+   the model can fall back to the `report` template. */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14pt 0;
+    font-size: 11pt;
+    page-break-inside: avoid;
+    break-inside: avoid-page;
+}
+th, td {
+    padding: 6pt 12pt 6pt 0;
+    vertical-align: top;
+    text-align: left;
+    border: 0;
+}
+th {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 9.5pt;
+    color: #0c0c0d;
+    border-bottom: 1px solid #1c1c1e;
+    padding-bottom: 4pt;
+}
+
+code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 10pt;
+    background: #f3f3f5;
+    padding: 1pt 4pt;
+    border-radius: 2pt;
+}
+pre {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 10pt;
+    background: #f3f3f5;
+    padding: 10pt 12pt;
+    border-radius: 3pt;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+    page-break-inside: avoid;
+    break-inside: avoid-page;
+}
+pre code { background: transparent; padding: 0; }
+
+figure {
+    margin: 12pt 0;
+    text-align: center;
+    page-break-inside: avoid;
+    break-inside: avoid-page;
+}
+figure img { max-width: 100%; height: auto; }
+figcaption {
+    font-size: 9.5pt;
+    color: #6e6e72;
+    margin-top: 4pt;
+    font-style: italic;
+}
+
+img { max-width: 100%; height: auto; }

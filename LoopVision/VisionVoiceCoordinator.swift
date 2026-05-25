@@ -426,9 +426,13 @@ final class VisionVoiceCoordinator {
     }
 
     /// A terse spoken-style label for the tool the model just invoked, e.g.
-    /// `web_search` → "Running web search…". Generic on purpose — keeps the
-    /// caption honest without re-porting the Mac's per-skill statusText map.
+    /// `web_search` → "Running web search…". Devin and Cursor dispatches —
+    /// the high-signal cases the user is likeliest to be watching for — get
+    /// the same skill-authored label iPhone shows ("dispatching Devin on
+    /// owner/repo"). Other tools fall through to the generic pretty-print.
     private static func activityLabel(for call: FunctionCallStruct) -> String {
+        if let s = DevinSkill.shared.statusText(for: call) { return s }
+        if let s = CursorSkill.shared.statusText(for: call) { return s }
         let pretty = call.name
             .replacingOccurrences(of: "_", with: " ")
             .trimmingCharacters(in: .whitespaces)

@@ -159,6 +159,82 @@ final class SubAgentMacStatusBar: NSView {
 
 // MARK: - Inspector window
 
+/// Lightweight wrapper for Devin/Cursor cloud agent rows in the Mac inspector.
+/// Mirrors the iPhone `CloudAgentRow` enum so the two surfaces show the same
+/// information per row.
+private enum MacCloudAgentRow {
+    case devin(DevinAgentJob)
+    case cursor(CursorAgentJob)
+
+    var title: String {
+        switch self {
+        case .devin(let job): return job.displayTitle
+        case .cursor(let job):
+            let trimmed = job.task.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "\n", with: " ")
+            if trimmed.count <= 80 { return trimmed }
+            return String(trimmed.prefix(77)) + "\u{2026}"
+        }
+    }
+
+    var status: String {
+        switch self {
+        case .devin(let job): return job.status.capitalized
+        case .cursor(let job): return job.status.capitalized
+        }
+    }
+
+    var isTerminal: Bool {
+        switch self {
+        case .devin(let job): return job.isTerminal
+        case .cursor(let job): return job.isTerminal
+        }
+    }
+
+    var providerLabel: String {
+        switch self {
+        case .devin: return "Devin"
+        case .cursor: return "Cursor"
+        }
+    }
+
+    var statusColor: NSColor {
+        switch self {
+        case .devin(let job):
+            switch job.status {
+            case "running":  return .systemGreen
+            case "blocked":  return .systemYellow
+            case "finished": return .systemGray
+            case "error":    return .systemRed
+            default:         return .systemGray
+            }
+        case .cursor(let job):
+            switch job.status {
+            case "running":  return .systemGreen
+            case "finished": return .systemGray
+            case "error":    return .systemRed
+            default:         return .systemGray
+            }
+        }
+    }
+}
+
+/// One slot in the inspector's flat row model. Mirrors iPhone's two-section
+/// `UITableView` (Local / Cloud) using a single `NSTableView`, with header rows
+/// rendered as non-selectable labels.
+private enum InspectorRow {
+    case header(String)
+    case native(SubAgent)
+    case cloud(MacCloudAgentRow)
+
+    var isSelectable: Bool {
+        switch self {
+        case .header: return false
+        case .native, .cloud: return true
+        }
+    }
+}
+
 final class SubAgentInspectorWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
     /// Single shared inspector so repeated clicks on the status bar bring the
     /// same window forward instead of opening duplicates.
@@ -166,8 +242,11 @@ final class SubAgentInspectorWindowController: NSWindowController, NSTableViewDa
 
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
-    private let emptyLabel = NSTextField(labelWithString: "No sub-agents running.")
-    private var agents: [SubAgent] = []
+    private let emptyLabel = NSTextField(labelWithString: "No agents running.")
+    /// Flat row model — headers + native + cloud rows in display order, the
+    /// same ordering iPhone's `SubAgentInspectorVC` uses (live first within
+    /// each kind, then terminal, both newest-first).
+    private var rows: [InspectorRow] = []
 
     /// Conversation the inspector is currently scoped to. Set by the chat
     /// window when the user clicks the pill; switches at runtime when the
@@ -264,13 +343,36 @@ final class SubAgentInspectorWindowController: NSWindowController, NSTableViewDa
     }
 
     func reload() {
-        // Mirror `SubAgentManager.allAgents` ordering (alive first, then done
-        // by finish-time desc) within the scoped subset, so the list matches
-        // what the user already saw in the unscoped view.
-        let scoped = SubAgentManager.shared.liveAgents(for: conversationId)
+        // Mirror `SubAgentInspectorVC` on iPhone: two logical sections — Local
+        // Sub-agents and Cloud Agents — each showing non-terminal entries first
+        // (newest first) then terminal entries (newest first). Renders as a
+        // single NSTableView with header rows interleaved.
+        let nativeAgents = SubAgentManager.shared.liveAgents(for: conversationId)
             + SubAgentManager.shared.finishedAgents(for: conversationId)
-        agents = scoped
-        emptyLabel.isHidden = !agents.isEmpty
+
+        var cloud: [MacCloudAgentRow] = []
+        let devinJobs = DevinAgentService.shared.allJobs().filter { job in
+            conversationId == nil || job.conversationId == conversationId
+        }
+        for job in devinJobs where !job.isTerminal { cloud.append(.devin(job)) }
+        let cursorJobs = CursorAgentService.shared.allJobs().filter { job in
+            conversationId == nil || job.conversationId == conversationId
+        }
+        for job in cursorJobs where !job.isTerminal { cloud.append(.cursor(job)) }
+        for job in devinJobs where job.isTerminal { cloud.append(.devin(job)) }
+        for job in cursorJobs where job.isTerminal { cloud.append(.cursor(job)) }
+
+        var next: [InspectorRow] = []
+        if !nativeAgents.isEmpty {
+            next.append(.header("Local Sub-agents"))
+            next.append(contentsOf: nativeAgents.map(InspectorRow.native))
+        }
+        if !cloud.isEmpty {
+            next.append(.header("Cloud Agents"))
+            next.append(contentsOf: cloud.map(InspectorRow.cloud))
+        }
+        rows = next
+        emptyLabel.isHidden = !rows.isEmpty
         tableView.reloadData()
     }
 
@@ -291,36 +393,185 @@ final class SubAgentInspectorWindowController: NSWindowController, NSTableViewDa
     // MARK: NSTableView
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        return agents.count
+        return rows.count
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard row < agents.count else { return nil }
-        let agent = agents[row]
-        let identifier = NSUserInterfaceItemIdentifier("SubAgentRow")
-        let view = tableView.makeView(withIdentifier: identifier, owner: nil) as? SubAgentRowView
-            ?? SubAgentRowView()
-        view.identifier = identifier
-        view.configure(with: agent)
-        view.onStop = { [weak self] in
-            SubAgentManager.shared.kill(id: agent.id)
-            self?.reload()
+        guard row < rows.count else { return nil }
+        switch rows[row] {
+        case .header(let title):
+            let identifier = NSUserInterfaceItemIdentifier("InspectorHeader")
+            let view = tableView.makeView(withIdentifier: identifier, owner: nil) as? InspectorHeaderRowView
+                ?? InspectorHeaderRowView()
+            view.identifier = identifier
+            view.configure(title: title)
+            return view
+        case .native(let agent):
+            let identifier = NSUserInterfaceItemIdentifier("SubAgentRow")
+            let view = tableView.makeView(withIdentifier: identifier, owner: nil) as? SubAgentRowView
+                ?? SubAgentRowView()
+            view.identifier = identifier
+            view.configure(with: agent)
+            view.onStop = { [weak self] in
+                SubAgentManager.shared.kill(id: agent.id)
+                self?.reload()
+            }
+            view.onRemove = { [weak self] in
+                SubAgentManager.shared.remove(id: agent.id)
+                self?.reload()
+            }
+            return view
+        case .cloud(let cloud):
+            let identifier = NSUserInterfaceItemIdentifier("CloudAgentRow")
+            let view = tableView.makeView(withIdentifier: identifier, owner: nil) as? CloudAgentRowView
+                ?? CloudAgentRowView()
+            view.identifier = identifier
+            view.configure(with: cloud)
+            return view
         }
-        view.onRemove = { [weak self] in
-            SubAgentManager.shared.remove(id: agent.id)
-            self?.reload()
-        }
-        return view
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        return 78
+        guard row < rows.count else { return 78 }
+        switch rows[row] {
+        case .header: return 28
+        case .native: return 78
+        case .cloud:  return 66
+        }
+    }
+
+    func tableView(_ tableView: NSTableView, selectionIndexesForProposedSelection proposedSelectionIndexes: IndexSet) -> IndexSet {
+        // Strip header rows so they don't take the selection highlight.
+        // `IndexSet.filter` returns `[Int]` — wrap it back into an IndexSet
+        // for the delegate's return type.
+        return IndexSet(proposedSelectionIndexes.filter { idx in
+            guard rows.indices.contains(idx) else { return false }
+            return rows[idx].isSelectable
+        })
     }
 
     @objc private func rowDoubleClicked() {
         let row = tableView.clickedRow
-        guard row >= 0, row < agents.count else { return }
-        SubAgentDetailWindowController.show(agentId: agents[row].id)
+        guard row >= 0, row < rows.count else { return }
+        switch rows[row] {
+        case .header:
+            return
+        case .native(let agent):
+            SubAgentDetailWindowController.show(agentId: agent.id)
+        case .cloud(.devin(let job)):
+            // Reuse the full Subagents window (split-view list + transcript) —
+            // same surface iPhone pushes `DevinAgentDetailVC` for.
+            SubagentsWindowController.shared.show(sessionId: job.sessionId)
+        case .cloud(.cursor(let job)):
+            // Cursor has no in-app detail VC on iPhone either — it opens the
+            // PR or dashboard in a browser. Mirror that.
+            if let urlString = job.prURL ?? job.dashboardURL,
+               let url = URL(string: urlString) {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    }
+}
+
+// MARK: - Inspector row views (header + cloud)
+
+/// Section-header row used between the Local and Cloud groups in the inspector.
+private final class InspectorHeaderRowView: NSView {
+    private let label = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        wantsLayer = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.drawsBackground = false
+        label.isBezeled = false
+        label.isEditable = false
+        label.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .secondaryLabelColor
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+        ])
+    }
+
+    func configure(title: String) {
+        label.stringValue = title.uppercased()
+    }
+}
+
+/// Row used for Devin / Cursor cloud agents in the inspector. Same vertical
+/// information density as iPhone's `CloudAgentCell`: title, provider, state.
+private final class CloudAgentRowView: NSView {
+    private let badge = NSView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let providerLabel = NSTextField(labelWithString: "")
+    private let stateLabel = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        wantsLayer = true
+
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        badge.wantsLayer = true
+        badge.layer?.cornerRadius = 5
+        addSubview(badge)
+
+        for label in [titleLabel, providerLabel, stateLabel] {
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.drawsBackground = false
+            label.isBezeled = false
+            label.isEditable = false
+            addSubview(label)
+        }
+        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 2
+        providerLabel.font = NSFont.systemFont(ofSize: 11)
+        providerLabel.textColor = .secondaryLabelColor
+        stateLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+
+        NSLayoutConstraint.activate([
+            badge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            badge.topAnchor.constraint(equalTo: titleLabel.topAnchor, constant: 3),
+            badge.widthAnchor.constraint(equalToConstant: 10),
+            badge.heightAnchor.constraint(equalToConstant: 10),
+
+            titleLabel.leadingAnchor.constraint(equalTo: badge.trailingAnchor, constant: 8),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+
+            providerLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            providerLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
+
+            stateLabel.leadingAnchor.constraint(equalTo: providerLabel.trailingAnchor, constant: 8),
+            stateLabel.centerYAnchor.constraint(equalTo: providerLabel.centerYAnchor),
+        ])
+    }
+
+    func configure(with row: MacCloudAgentRow) {
+        titleLabel.stringValue = row.title
+        providerLabel.stringValue = row.providerLabel
+        stateLabel.stringValue = row.status.uppercased()
+        stateLabel.textColor = row.statusColor
+        badge.layer?.backgroundColor = row.statusColor.cgColor
     }
 }
 

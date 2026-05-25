@@ -20,6 +20,15 @@ extension Notification.Name {
     /// queue alongside `onStateChange` so cross-platform observers like
     /// MusicController can listen with one subscription.
     static let voiceLoopStateDidChange = Notification.Name("voiceLoopStateDidChange")
+
+    /// Posted whenever the user submits a turn — typed text via the recorder
+    /// or a finished voice transcript — *regardless* of where it ends up
+    /// (LLM, onboarding script, scrubbed empty, etc). Anything tracking "has
+    /// the user said something yet?" should listen here instead of watching
+    /// for `.thinking` on `voiceLoopStateDidChange`, because the conversational
+    /// onboarding consumes text inline and never transitions through
+    /// `.thinking`.
+    static let voiceLoopUserMessageSubmitted = Notification.Name("voiceLoopUserMessageSubmitted")
 }
 
 protocol ConversationPresenter: AnyObject {
@@ -533,6 +542,30 @@ The current date and time is \(now).
     }
 
     func sendUserText(_ text: String) {
+        // Announce the submission before anything else gets to consume the
+        // text. The windowed Mac onboarding ("Send your first message")
+        // listens to this so it can dismiss whether the message ends up at
+        // the LLM, the conversational onboarding script, or scrubbed empty.
+        NotificationCenter.default.post(name: .voiceLoopUserMessageSubmitted, object: nil)
+
+        // Mid-onboarding text goes to the shared coordinator first. If it
+        // consumes the input (echoes a bubble, advances the script), we
+        // short-circuit before the regular LLM-bound `sendTurn`. The Mac
+        // host already routes scripted prompts + chips through the chat;
+        // this is the typed-text counterpart.
+        //
+        // Important: this path is also reached from `completeWithTranscript`
+        // (voice STT finishes → sendUserText). At that point `state` is
+        // `.transcribing` and the recorder UI sits on "Transcribing…" until
+        // the next state change. Returning early without resetting state
+        // would leave the recorder stuck. The onboarding consumed the
+        // message — the turn is over from our perspective, so drop to .idle
+        // and clear any partial transcript before bailing.
+        if OnboardingCoordinator.shared.handleUserText(text) {
+            state = .idle
+            onPartial?("")
+            return
+        }
         sendTurn(userMessage: MessageStruct(role: "user", content: text))
     }
 
@@ -541,6 +574,10 @@ The current date and time is \(now).
     /// conversation cell can render it inline. The model sees the file via
     /// the `[Attached file: …]` tag appended to `content` by `MessageStruct.dict`.
     func sendUserAttachment(_ attachment: FileAttachment, text: String?) {
+        // Same "user just submitted" signal as the text path — keeps the
+        // windowed onboarding's dismiss trigger uniform across drag-and-drop
+        // attachments and typed messages.
+        NotificationCenter.default.post(name: .voiceLoopUserMessageSubmitted, object: nil)
         var userMessage = MessageStruct(role: "user", content: text ?? "")
         userMessage.fileAttachment = attachment
         sendTurn(userMessage: userMessage)
@@ -734,6 +771,9 @@ The current date and time is \(now).
         if NotionSkill.shared.handles(functionName: function.name) {
             NotionSkill.shared.handle(functionCall: function, completion: cont); return
         }
+        if SlackSkill.shared.handles(functionName: function.name) {
+            SlackSkill.shared.handle(functionCall: function, completion: cont); return
+        }
         if SchedulerSkill.shared.handles(functionName: function.name) {
             SchedulerSkill.shared.handle(functionCall: function, completion: cont); return
         }
@@ -745,6 +785,9 @@ The current date and time is \(now).
         }
         if GitSkill.shared.handles(functionName: function.name) {
             GitSkill.shared.handle(functionCall: function, completion: cont); return
+        }
+        if GitHubSkill.shared.handles(functionName: function.name) {
+            GitHubSkill.shared.handle(functionCall: function, completion: cont); return
         }
         if SelfImprovementSkill.shared.handles(functionName: function.name) {
             SelfImprovementSkill.shared.handle(functionCall: function, completion: cont); return
@@ -770,6 +813,15 @@ The current date and time is \(now).
         if CalendarSkill.shared.handles(functionName: function.name) {
             CalendarSkill.shared.handle(functionCall: function, completion: cont); return
         }
+        if MusicSkill.shared.handles(functionName: function.name) {
+            MusicSkill.shared.handle(functionCall: function, completion: cont); return
+        }
+        if SkillBuilderSkill.shared.handles(functionName: function.name) {
+            SkillBuilderSkill.shared.handle(functionCall: function, completion: cont); return
+        }
+        if IntegrationSkill.shared.handles(functionName: function.name) {
+            IntegrationSkill.shared.handle(functionCall: function, completion: cont); return
+        }
         if ImageSkill.shared.handles(functionName: function.name) {
             // ImageSkill returns the function-result synchronously (a "queued,
             // appears inline shortly" stub) and the actual bytes arrive later
@@ -780,9 +832,28 @@ The current date and time is \(now).
             ImageSkill.shared.handle(functionCall: function, completion: cont)
             return
         }
+        if PDFSkill.shared.handles(functionName: function.name) {
+            // Same submit-and-return pattern as ImageSkill: PDFSkill hands
+            // the render to PDFGenerationService and returns a queued stub
+            // immediately; the cell fills in via PDFSkillHost on the
+            // conversation window when WKWebView finishes the render.
+            PDFSkill.shared.handle(functionCall: function, completion: cont)
+            return
+        }
         if SubAgentSkill.shared.handles(functionName: function.name) {
             SubAgentSkill.shared.handle(functionCall: function, completion: cont)
             return
+        }
+        if DevinSkill.shared.handles(functionName: function.name) {
+            DevinSkill.shared.handle(functionCall: function, completion: cont); return
+        }
+        if CursorSkill.shared.handles(functionName: function.name) {
+            CursorSkill.shared.handle(functionCall: function, completion: cont); return
+        }
+        // Dynamic (user-authored JS) skills last — hot-loaded so the
+        // registry is the source of truth for what's currently available.
+        if DynamicSkillRegistry.shared.handles(functionName: function.name) {
+            DynamicSkillRegistry.shared.handle(functionCall: function, completion: cont); return
         }
         // Unknown tool — fail gracefully.
         let fallback = MessageStruct(role: "function", content: "Tool \(function.name) is not available on Mac.", name: function.name)
@@ -792,6 +863,7 @@ The current date and time is \(now).
     private func statusText(for call: FunctionCallStruct) -> String {
         if let s = ExaSkill.shared.statusText(for: call) { return s }
         if let s = NotionSkill.shared.statusText(for: call) { return s }
+        if let s = SlackSkill.shared.statusText(for: call) { return s }
         if let s = SchedulerSkill.shared.statusText(for: call) { return s }
         if let s = SelfImprovementSkill.shared.statusText(for: call) { return s }
         if let s = FileSystemSkill.shared.statusText(for: call) { return s }
@@ -800,7 +872,14 @@ The current date and time is \(now).
         if let s = TerminalSkill.shared.statusText(for: call) { return s }
         if let s = ObsidianSkill.shared.statusText(for: call) { return s }
         if let s = CalendarSkill.shared.statusText(for: call) { return s }
+        if let s = MusicSkill.shared.statusText(for: call) { return s }
+        if let s = SkillBuilderSkill.shared.statusText(for: call) { return s }
+        if let s = GitHubSkill.shared.statusText(for: call) { return s }
+        if let s = PDFSkill.shared.statusText(for: call) { return s }
         if let s = SubAgentSkill.shared.statusText(for: call) { return s }
+        if let s = DevinSkill.shared.statusText(for: call) { return s }
+        if let s = CursorSkill.shared.statusText(for: call) { return s }
+        if let s = DynamicSkillRegistry.shared.statusText(for: call) { return s }
         return "running \(call.name.replacingOccurrences(of: "_", with: " "))"
     }
 
@@ -817,6 +896,16 @@ The current date and time is \(now).
             self.conversation = refreshed
         }
         messages.append(message)
+        // Auto-title hook: same trigger as iOS — only fires when there's
+        // a real user-and-assistant exchange and the chat still has its
+        // default title. ConversationTitleService dedupes by conv id, so
+        // calling on every assistant turn is safe.
+        if let target = self.conversation {
+            ConversationTitleService.shared.generateIfNeeded(
+                for: target,
+                messages: messages
+            )
+        }
     }
 
     // MARK: - TTS
