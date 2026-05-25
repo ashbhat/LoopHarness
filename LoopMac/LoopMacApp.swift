@@ -89,6 +89,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             systemPromptFragment: ImageSkill.systemPromptFragment
         )
 
+        // PDF generation — same registration shape as ImageSkill. PDFSkill
+        // is target-agnostic; the actual WKWebView render happens in
+        // PDFGenerationService and posts back via the conversation window
+        // as PDFSkillHost (wired below alongside the ImageSkill host).
+        AgentHarness.shared.registerSkill(
+            tools: PDFSkill.tools,
+            systemPromptFragment: PDFSkill.systemPromptFragment
+        )
+
         let initialCoordinator = VoiceLoopCoordinator()
         self.coordinator = initialCoordinator
 
@@ -117,6 +126,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // weak host; make the conversation window the receiver so generated
         // images render inline.
         ImageGenerationService.shared.host = conversation
+        // Same host for PDFGenerationService — the conversation window
+        // implements PDFSkillHost and renders the PDF cell when the render
+        // completes.
+        PDFGenerationService.shared.host = conversation
 
         let monitor = HotKeyMonitor()
         // All hotkey closures route through `recorder.coordinator`, which the
@@ -170,6 +183,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(handleIntegrationSettingsRequest(_:)),
             name: .integrationSkillRequestedSettings,
+            object: nil
+        )
+
+        // NavigationSkill follows the same pattern — observes here and
+        // routes the panel id to the matching Mac WindowController. Panels
+        // without a Mac equivalent (workspace files, conversations, agent
+        // immersive view) fall through to no-ops with a debug log. The
+        // skill itself is already in the shared `tools` array + AgentHarness
+        // systemPrompt, so no registerSkill call is needed here.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleNavigationOpenPanel(_:)),
+            name: .navigationSkillOpenPanel,
             object: nil
         )
 
@@ -250,6 +276,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             IntegrationsWindowController.shared.show()
+        }
+    }
+
+    /// NavigationSkill posts this when the model calls `open_panel`. Maps the
+    /// stable panel id to whichever WindowController Mac has for that
+    /// surface. Panels without a Mac equivalent (workspace, conversations,
+    /// immersive agent view) raise the conversation window instead so the
+    /// user lands somewhere reasonable rather than nothing happening.
+    @objc private func handleNavigationOpenPanel(_ note: Notification) {
+        let panel = (note.userInfo?["panel"] as? String) ?? ""
+        DispatchQueue.main.async { [weak self] in
+            switch panel {
+            case "integrations":
+                IntegrationsWindowController.shared.show()
+            case "keys", "settings":
+                // No standalone Settings root on Mac — Keys is the main
+                // settings window; `settings` resolves there too.
+                SettingsWindowController.shared.showKeys()
+            case "subagents":
+                SubagentsWindowController.shared.show()
+            case "scheduled":
+                ScheduledTasksWindowController.shared.show()
+            case "microphone":
+                MicrophoneSettingsWindowController.shared.show()
+            case "files", "workspace", "conversations", "skills", "agent", "model":
+                // Mac doesn't have these as discrete windows. Surface the
+                // conversation window so the user has somewhere to go.
+                self?.conversationController?.showAndReload()
+            default:
+                break
+            }
         }
     }
 
@@ -704,6 +761,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         MacOnboardingState.isComplete = false
         MacOnboardingState.lastStep = 0
+        // The Mac welcome window only covers the platform-specific steps
+        // (welcome / accessibility / launch-at-login / "send your first
+        // message"). The model pick, key paste, integrations, TTS and name
+        // prompts live in the shared conversational coordinator. Without
+        // resetting it here, `handleUserText` would see `isComplete == true`
+        // from the prior run, return false on the user's first message, and
+        // route them straight to the LLM — skipping every chat-side setup
+        // step. Mirrors what iOS does in SettingsVC.replayOnboarding().
+        OnboardingState.isComplete = false
+        OnboardingState.lastStep = 0
+        OnboardingCoordinator.shared.resetForReplay()
+        OnboardingCoordinator.shared.resumeIfNeeded()
         // Drop any existing onboarding window before opening a fresh one so
         // we don't end up with two stacked welcome panes if the user clicks
         // the menu item twice.

@@ -391,15 +391,22 @@ final class OnboardingViewController: UIViewController {
         let title = makeTitle("Bind Loop to your Action Button")
         let body = makeSubtitle("Add the “Start Dictation” shortcut so a single squeeze starts a Loop conversation.")
 
+        // Mock Settings UI doubles as deep-link affordance — tapping the
+        // Action Button row or the Choose a Shortcut pill jumps straight to
+        // iOS Settings via the same path the "Open Settings" CTA below uses.
+        let openSettings: () -> Void = { [weak self] in
+            self?.openActionButtonSettings()
+        }
         let stepsCard = makeStepsCard([
-            (1, "Open Settings, then tap Action Button.",
+            (1, "Open Settings, then tap Action Button. You may need to swipe back to the root if on a different page in settings",
                 makeMockSettingsRow(image: UIImage(named: "ActionButtonGlyph"),
                                     title: "Action Button",
-                                    tileColor: .systemBlue)),
+                                    tileColor: .systemBlue,
+                                    onTap: openSettings)),
             (2, "Swipe the carousel to the Shortcut option.",
                 makeMockShortcutChip()),
             (3, "Tap Choose a Shortcut, then pick Loop → Start Dictation.",
-                makeMockChooseShortcutPill()),
+                makeMockChooseShortcutPill(onTap: openSettings)),
             (4, "Swipe back to Loop when you’re done.", nil),
         ])
 
@@ -573,7 +580,10 @@ final class OnboardingViewController: UIViewController {
 
     /// A facsimile of an iOS Settings list row (icon tile, title, chevron) so
     /// the user recognizes the "Action Button" row to tap.
-    private func makeMockSettingsRow(image: UIImage?, title: String, tileColor: UIColor) -> UIView {
+    private func makeMockSettingsRow(image: UIImage?,
+                                     title: String,
+                                     tileColor: UIColor,
+                                     onTap: (() -> Void)? = nil) -> UIView {
         let tile = UIView()
         tile.backgroundColor = tileColor
         tile.layer.cornerRadius = 6
@@ -617,6 +627,10 @@ final class OnboardingViewController: UIViewController {
         row.backgroundColor = .systemBackground
         row.layer.cornerRadius = 10
         row.layer.cornerCurve = .continuous
+        if let onTap = onTap {
+            row.isUserInteractionEnabled = true
+            row.addGestureRecognizer(ModalClosureTapRecognizer(action: onTap))
+        }
         return row
     }
 
@@ -668,7 +682,7 @@ final class OnboardingViewController: UIViewController {
     }
 
     /// The blue "Choose a Shortcut" pill shown under the Shortcut mode.
-    private func makeMockChooseShortcutPill() -> UIView {
+    private func makeMockChooseShortcutPill(onTap: (() -> Void)? = nil) -> UIView {
         let plus = UIImageView(image: UIImage(systemName: "plus.circle.fill"))
         plus.tintColor = .systemBlue
         plus.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
@@ -687,6 +701,10 @@ final class OnboardingViewController: UIViewController {
         pill.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.12)
         pill.layer.cornerRadius = 16
         pill.layer.cornerCurve = .continuous
+        if let onTap = onTap {
+            pill.isUserInteractionEnabled = true
+            pill.addGestureRecognizer(ModalClosureTapRecognizer(action: onTap))
+        }
 
         // Hug the pill to its content and left-align it under the step text.
         let wrap = UIStackView(arrangedSubviews: [pill, UIView()])
@@ -844,5 +862,21 @@ final class ClosureButton: UIButton {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    @objc private func invoke() { actionClosure() }
+}
+
+/// UITapGestureRecognizer counterpart of `ClosureButton`, used by the
+/// mock-Settings rows in the action-button walkthrough so taps on the
+/// "Action Button" row and "Choose a Shortcut" pill route to the same
+/// deep-link handler as the explicit "Open Settings" CTA. Name-spaced
+/// with `Modal*` to avoid colliding with the equivalent helper in
+/// `OnboardingCardView.swift`.
+private final class ModalClosureTapRecognizer: UITapGestureRecognizer {
+    private let actionClosure: () -> Void
+    init(action: @escaping () -> Void) {
+        self.actionClosure = action
+        super.init(target: nil, action: nil)
+        addTarget(self, action: #selector(invoke))
+    }
     @objc private func invoke() { actionClosure() }
 }

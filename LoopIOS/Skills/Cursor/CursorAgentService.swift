@@ -186,7 +186,10 @@ final class CursorAgentService {
                   completion: @escaping (DispatchResult) -> Void) {
 
         guard let key = KeyStore.shared.value(for: .cursor), !key.isEmpty else {
-            completion(.failure("No Cursor key set. Add CURSOR_API_KEY in Settings ▸ Keys."))
+            completion(.failure(KeyStore.missingKeyInstruction(
+                for: [.cursor],
+                purpose: "dispatching coding tasks to Cursor cloud agents"
+            )))
             return
         }
         guard let url = URL(string: CursorAPI.base + CursorAPI.agentsPath) else {

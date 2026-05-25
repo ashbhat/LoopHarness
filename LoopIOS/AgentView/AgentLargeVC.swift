@@ -21,6 +21,15 @@ final class AgentLargeVC: UIViewController {
     /// orb state for things like preheat / transition snapshots later.
     let agentView = AgentLargeView()
 
+    /// Receiver for the press-and-hold pill's voice events. Forwarded
+    /// straight through to `agentView.voiceDelegate` — exposed at the
+    /// controller level so the presenter (MainVC) doesn't have to reach
+    /// into the view to wire it up.
+    weak var voiceDelegate: AgentLargeViewVoiceDelegate? {
+        get { agentView.voiceDelegate }
+        set { agentView.voiceDelegate = newValue }
+    }
+
     /// Pan gesture used for the rubber-band drag-down dismiss. Tracked here
     /// so the gesture can be cancelled / reset cleanly on dismiss.
     private var panGesture: UIPanGestureRecognizer!

@@ -104,21 +104,22 @@ final class SettingsVC: UIViewController {
         present(alert, animated: true)
     }
 
-    /// Resets the onboarding flags and presents the modal on top of Settings.
-    /// We don't bounce through SceneDelegate.presentOnboardingIfNeeded because
-    /// that only runs on scene connect — driving the present from here means
-    /// the user gets immediate feedback without a relaunch.
+    /// Resets the onboarding flags and dismisses Settings. The conversational
+    /// onboarding now lives inside MessagingVC; calling `resetForReplay()`
+    /// on the coordinator lets `resumeIfNeeded()` re-fire in the existing
+    /// MessagingVC instance — the user lands back on the chat with the
+    /// greeting card already posted.
     private func replayOnboarding() {
         OnboardingState.isComplete = false
         OnboardingState.lastStep = 0
+        OnboardingState.actionButtonSkipped = false
+        OnboardingState.actionButtonReminderDismissedAt = nil
 
-        let vc = OnboardingViewController()
-        // Dismiss Settings on completion so the user lands back on the
-        // conversation pane, matching what they'd see on a real first run.
-        vc.onCompleted = { [weak self] in
-            self?.dismiss(animated: true)
+        OnboardingCoordinator.shared.resetForReplay()
+
+        dismiss(animated: true) {
+            OnboardingCoordinator.shared.resumeIfNeeded()
         }
-        present(vc, animated: true)
     }
 }
 

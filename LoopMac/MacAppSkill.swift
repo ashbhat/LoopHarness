@@ -226,10 +226,13 @@ Workflow tips:
 
     // MARK: - Discovery
     //
-    // Walks /Applications, ~/Applications, and /System/Applications. We don't
-    // recurse arbitrarily deep because some apps bundle helper .app's that
-    // shouldn't surface. /System/Applications/Utilities/* is shallow-walked
-    // explicitly so Terminal etc. are found.
+    // Spotlight-backed enumeration. The previous implementation walked
+    // /Applications, ~/Applications, /System/Applications directly, which
+    // the App Sandbox forbids. NSMetadataQuery runs against the metadata
+    // daemon out-of-process, so sandboxed apps can still see every .app
+    // bundle on the volume; we then hand the URLs off to LaunchServices
+    // (NSWorkspace.openApplication), which sandboxed apps are allowed to
+    // call.
 
     private struct DiscoveredApp {
         let name: String
@@ -237,31 +240,49 @@ Workflow tips:
     }
 
     private static func discoverInstalledApps() -> [DiscoveredApp] {
-        let fm = FileManager.default
-        let home = fm.homeDirectoryForCurrentUser
-        let roots = [
-            URL(fileURLWithPath: "/Applications"),
-            URL(fileURLWithPath: "/Applications/Utilities"),
-            home.appendingPathComponent("Applications"),
-            URL(fileURLWithPath: "/System/Applications"),
-            URL(fileURLWithPath: "/System/Applications/Utilities"),
-        ]
+        let sem = DispatchSemaphore(value: 0)
+        var results: [DiscoveredApp] = []
 
-        var seen = Set<String>()
-        var out: [DiscoveredApp] = []
-        for root in roots {
-            guard let entries = try? fm.contentsOfDirectory(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles]
-            ) else { continue }
-            for url in entries where url.pathExtension == "app" {
-                let name = url.deletingPathExtension().lastPathComponent
-                if seen.insert(name).inserted {
-                    out.append(DiscoveredApp(name: name, url: url))
+        // NSMetadataQuery requires a run loop; bounce to main, kick off
+        // the query, and signal back when gathering finishes.
+        DispatchQueue.main.async {
+            let query = NSMetadataQuery()
+            query.searchScopes = [NSMetadataQueryLocalComputerScope]
+            query.predicate = NSPredicate(
+                format: "kMDItemContentTypeTree == 'com.apple.application-bundle'"
+            )
+
+            var observer: NSObjectProtocol?
+            observer = NotificationCenter.default.addObserver(
+                forName: .NSMetadataQueryDidFinishGathering,
+                object: query,
+                queue: .main
+            ) { _ in
+                query.disableUpdates()
+                query.stop()
+                var seen = Set<String>()
+                for i in 0..<query.resultCount {
+                    guard let item = query.result(at: i) as? NSMetadataItem,
+                          let path = item.value(forAttribute: NSMetadataItemPathKey) as? String
+                    else { continue }
+                    let url = URL(fileURLWithPath: path)
+                    let name = url.deletingPathExtension().lastPathComponent
+                    if seen.insert(name).inserted {
+                        results.append(DiscoveredApp(name: name, url: url))
+                    }
                 }
+                if let observer = observer {
+                    NotificationCenter.default.removeObserver(observer)
+                }
+                sem.signal()
             }
+            query.start()
         }
-        return out
+
+        // Bounded wait — if Spotlight is rebuilding its index this can be
+        // slow; 8s is enough on a healthy machine and prevents the tool
+        // from hanging the agent loop.
+        _ = sem.wait(timeout: .now() + 8.0)
+        return results
     }
 }

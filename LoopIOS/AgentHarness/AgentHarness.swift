@@ -104,6 +104,7 @@ final class AgentHarness {
         ("Spec Builder",     "Draft execution specs from a goal"),
         ("Location",         "Look up the device's current location"),
         ("Image",            "Generate images from a text prompt"),
+        ("PDF",              "Generate a clean, page-aware PDF from a markdown document"),
         ("Obsidian",         "Read and write the Obsidian vault"),
         ("Calendar",         "Read and create calendar events"),
         ("Music",            "Search and control Apple Music"),
@@ -127,13 +128,16 @@ final class AgentHarness {
             FileSystemSkill.systemPromptFragment,
             SpecBuilderSkill.systemPromptFragment,
             LocationSkill.systemPromptFragment,
+            MapsSkill.systemPromptFragment,
             ImageSkill.systemPromptFragment,
+            PDFSkill.systemPromptFragment,
             ObsidianSkill.systemPromptFragment,
             CalendarSkill.systemPromptFragment,
             MusicSkill.systemPromptFragment,
             SkillBuilderSkill.systemPromptFragment,
             SubAgentSkill.systemPromptFragment,
             IntegrationSkill.systemPromptFragment,
+            NavigationSkill.systemPromptFragment,
             CursorSkill.systemPromptFragment,
             DevinSkill.systemPromptFragment
         ].joined(separator: "\n\n")
@@ -442,6 +446,30 @@ final class AgentHarness {
 
     private func selfDocURL(for doc: SelfDoc) -> URL {
         return Workspace.shared.rootURL.appendingPathComponent(doc.filename)
+    }
+
+    /// Write the in-memory default for every self-doc to disk if the file
+    /// isn't already there. Idempotent — existing user edits are preserved.
+    /// Called by the onboarding coordinator on first launch so the user
+    /// immediately sees SOUL.md / USER.md / MEMORY.md / AGENTS.md /
+    /// HEARTBEAT.md in their iCloud workspace (and can open them in Files
+    /// or edit them externally) without having to wait for a tool call to
+    /// trigger the first persistence.
+    func seedSelfDocsIfMissing() {
+        let fm = FileManager.default
+        for doc in SelfDoc.allCases {
+            let url = selfDocURL(for: doc)
+            if fm.fileExists(atPath: url.path) { continue }
+            let content = readSelfDoc(doc)
+            do {
+                try Workspace.shared.coordinatedWrite(to: url) { writeURL in
+                    try content.write(to: writeURL, atomically: true, encoding: .utf8)
+                }
+                print("AgentHarness: seeded \(doc.filename)")
+            } catch {
+                print("AgentHarness: failed to seed \(doc.filename) — \(error)")
+            }
+        }
     }
 
     private func persistSelfDoc(_ doc: SelfDoc, content: String) {
