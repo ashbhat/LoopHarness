@@ -2,10 +2,10 @@
 //  SubAgentSkill.swift
 //  Loop
 //
-//  Exposes `spawn_sub_agent` and `list_sub_agents` to the primary agent so it
-//  can intentionally delegate long-running work. Spawned sub-agents run
-//  asynchronously; this skill returns immediately so the primary conversation
-//  isn't blocked.
+//  Exposes `spawn_sub_agent`, `list_sub_agents`, and `cancel_sub_agent` to the
+//  primary agent so it can intentionally delegate long-running work. Spawned
+//  sub-agents run asynchronously; this skill returns immediately so the primary
+//  conversation isn't blocked.
 //
 
 import Foundation
@@ -58,6 +58,11 @@ Tools:
   conversation as a normal assistant message.
 - list_sub_agents: list active and recent sub-agents with their state and
   current step. Use when the user asks "what are you running?" or similar.
+- cancel_sub_agent: stop a running sub-agent by `id`. Use when the user says
+  "cancel that agent", "kill the sub-agent", "stop the background task", etc.
+  If you don't know the id, call list_sub_agents first to find the active one,
+  then call cancel_sub_agent with its id. Gracefully handles already-finished
+  agents and invalid ids.
 
 After spawning, tell the user briefly what you kicked off and that it'll
 post back when done. Don't include the id in your reply.
@@ -99,10 +104,27 @@ post back when done. Don't include the id in your reply.
                     "required": []
                 ]
             ]
+        ],
+        [
+            "type": "function",
+            "function": [
+                "name": "cancel_sub_agent",
+                "description": "Cancel/stop a running sub-agent by id. Use list_sub_agents first if you need to find the id. Gracefully handles already-finished agents and invalid ids.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "id": [
+                            "type": "string",
+                            "description": "The id of the sub-agent to cancel (from list_sub_agents)."
+                        ]
+                    ],
+                    "required": ["id"]
+                ]
+            ]
         ]
     ]
 
-    static let toolNames: Set<String> = ["spawn_sub_agent", "list_sub_agents"]
+    static let toolNames: Set<String> = ["spawn_sub_agent", "list_sub_agents", "cancel_sub_agent"]
 
     func handles(functionName: String) -> Bool {
         return SubAgentSkill.toolNames.contains(functionName)
@@ -112,6 +134,7 @@ post back when done. Don't include the id in your reply.
         switch call.name {
         case "spawn_sub_agent": return "spawning a sub-agent"
         case "list_sub_agents": return "checking on sub-agents"
+        case "cancel_sub_agent": return "cancelling a sub-agent"
         default: return nil
         }
     }
@@ -125,6 +148,8 @@ post back when done. Don't include the id in your reply.
             spawn(call: functionCall, completion: completion)
         case "list_sub_agents":
             list(completion: completion)
+        case "cancel_sub_agent":
+            cancel(call: functionCall, completion: completion)
         default:
             completion(MessageStruct(
                 role: "assistant",
@@ -208,6 +233,48 @@ post back when done. Don't include the id in your reply.
         completion(Self.functionMessage(
             name: "list_sub_agents",
             payload: ["count": rows.count, "sub_agents": rows]
+        ))
+    }
+
+    // MARK: - cancel_sub_agent
+
+    private func cancel(call: FunctionCallStruct,
+                        completion: @escaping (MessageStruct) -> Void) {
+        guard let id = (call.arguments["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !id.isEmpty else {
+            completion(Self.functionMessage(
+                name: "cancel_sub_agent",
+                payload: ["status": "error", "error": "id is required"]
+            ))
+            return
+        }
+        guard let agent = SubAgentManager.shared.agent(id: id) else {
+            completion(Self.functionMessage(
+                name: "cancel_sub_agent",
+                payload: ["status": "error", "error": "No sub-agent found with id \(id)"]
+            ))
+            return
+        }
+        guard agent.isAlive else {
+            completion(Self.functionMessage(
+                name: "cancel_sub_agent",
+                payload: [
+                    "status": "already_done",
+                    "id": id,
+                    "state": agent.state.rawValue,
+                    "message": "Sub-agent already finished (\(agent.state.rawValue))."
+                ]
+            ))
+            return
+        }
+        SubAgentManager.shared.kill(id: id, reason: "Cancelled by user")
+        completion(Self.functionMessage(
+            name: "cancel_sub_agent",
+            payload: [
+                "status": "cancelled",
+                "id": id,
+                "message": "Sub-agent has been cancelled."
+            ]
         ))
     }
 
