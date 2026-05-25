@@ -20,6 +20,12 @@ html, body {
     padding: 0;
 }
 
+/* WKWebView's createPDF ignores @page margins; body padding is
+   the only reliable content inset on iOS-rendered PDFs. */
+body {
+    padding: 1.0in 1.0in 1.0in 1.0in;
+}
+
 .letterhead {
     display: flex;
     justify-content: space-between;

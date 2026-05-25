@@ -77,8 +77,12 @@ html, body {
 }
 .cover-meta .brand { font-weight: 600; color: #1c1c1e; letter-spacing: 0.02em; }
 
+/* WKWebView's createPDF ignores @page margins, so horizontal
+   padding here is the only reliable content inset. Values match
+   the @page side margins so the result looks correct whether or
+   not the renderer honours @page. */
 .body {
-    padding: 0;
+    padding: 0.15in 0.85in;
 }
 
 h1, h2, h3, h4 {
@@ -106,7 +110,7 @@ h2 {
 h3 {
     font-size: 14pt;
     font-weight: 600;
-    margin: 22pt 0 6pt 0;
+    margin: 26pt 0 8pt 0;
     color: #2a2a2e;
 }
 
@@ -126,11 +130,11 @@ p {
 }
 
 ul, ol {
-    margin: 0 0 12pt 0;
+    margin: 0 0 14pt 0;
     padding-left: 22pt;
 }
 li {
-    margin-bottom: 4pt;
+    margin-bottom: 5pt;
     orphans: 2;
     widows: 2;
 }

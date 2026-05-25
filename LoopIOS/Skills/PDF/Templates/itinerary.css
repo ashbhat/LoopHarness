@@ -61,7 +61,9 @@ html, body {
 }
 .cover-meta .brand { font-weight: 700; color: #fff; letter-spacing: 0.04em; }
 
-.body { padding: 0; }
+/* WKWebView's createPDF ignores @page margins; horizontal padding
+   here provides the actual content inset on iOS-rendered PDFs. */
+.body { padding: 0.1in 0.75in; }
 
 h2 {
     font-size: 18pt;
@@ -90,7 +92,7 @@ h3 {
     letter-spacing: 0.05em;
 }
 
-p { margin: 0 0 8pt 0; orphans: 3; widows: 3; }
+p { margin: 0 0 10pt 0; orphans: 3; widows: 3; }
 
 ul, ol {
     margin: 0 0 10pt 0;
@@ -99,7 +101,7 @@ ul, ol {
 }
 li {
     position: relative;
-    padding: 6pt 0 6pt 22pt;
+    padding: 7pt 0 7pt 22pt;
     margin: 0;
     border-bottom: 1px solid rgba(13,42,74,0.08);
     page-break-inside: avoid;

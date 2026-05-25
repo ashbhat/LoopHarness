@@ -28,6 +28,12 @@ html, body {
     padding: 0;
 }
 
+/* WKWebView's createPDF ignores @page margins; body padding is
+   the only reliable content inset on iOS-rendered PDFs. */
+body {
+    padding: 0.5in 0.65in 0.7in 0.65in;
+}
+
 .doc-title { string-set: doc-title content(); }
 
 /* Notes has no cover — straight into the content. The `.cover` block is
@@ -66,7 +72,7 @@ h2 {
     font-weight: 700;
     letter-spacing: -0.005em;
     color: #1d1d1f;
-    margin: 16pt 0 6pt 0;
+    margin: 20pt 0 8pt 0;
     padding-bottom: 3pt;
     border-bottom: 1px solid rgba(29,29,31,0.15);
     page-break-after: avoid;
@@ -89,13 +95,13 @@ h4 {
     margin: 10pt 0 2pt 0;
 }
 
-p { margin: 0 0 6pt 0; orphans: 2; widows: 2; }
+p { margin: 0 0 8pt 0; orphans: 2; widows: 2; }
 
 ul, ol {
     margin: 0 0 8pt 0;
     padding-left: 18pt;
 }
-li { margin-bottom: 2pt; }
+li { margin-bottom: 3pt; }
 li::marker { color: #ff8a3d; }
 
 blockquote {
