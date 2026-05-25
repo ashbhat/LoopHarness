@@ -128,6 +128,13 @@ Workflow tips:
 
     func handle(functionCall: FunctionCallStruct,
                 completion: @escaping (MessageStruct) -> Void) {
+        // Short-circuit before any network call if the user hasn't configured
+        // an Exa key yet — return a function-role message that prompts the
+        // model to explain the situation and offer to store one securely.
+        if ExaSkill.apiKey == nil {
+            completion(ExaSkill.noApiKeyMessage(for: functionCall.name))
+            return
+        }
         let args = functionCall.arguments
         switch functionCall.name {
         case "exa_search":
@@ -272,7 +279,7 @@ Workflow tips:
                       completion: @escaping ([String: Any]?, Error?) -> Void) {
         guard let apiKey = ExaSkill.apiKey else {
             completion(nil, NSError(domain: "ExaSkill", code: -1,
-                                    userInfo: [NSLocalizedDescriptionKey: "EXA_API_KEY missing from Info.plist"]))
+                                    userInfo: [NSLocalizedDescriptionKey: "No Exa API key configured."]))
             return
         }
         guard let url = URL(string: ExaSkill.baseURL + path) else {
@@ -295,7 +302,7 @@ Workflow tips:
                      completion: @escaping ([String: Any]?, Error?) -> Void) {
         guard let apiKey = ExaSkill.apiKey else {
             completion(nil, NSError(domain: "ExaSkill", code: -1,
-                                    userInfo: [NSLocalizedDescriptionKey: "EXA_API_KEY missing from Info.plist"]))
+                                    userInfo: [NSLocalizedDescriptionKey: "No Exa API key configured."]))
             return
         }
         guard let url = URL(string: ExaSkill.baseURL + path) else {
@@ -368,5 +375,16 @@ Workflow tips:
     private static func errorMessage(_ prefix: String, error: Error?) -> MessageStruct {
         let detail = error?.localizedDescription ?? "Unknown error"
         return MessageStruct(role: "assistant", content: "\(prefix) \(detail)")
+    }
+
+    /// Returned as the function result when no Exa API key is configured.
+    /// Sent as a function-role message so the model phrases the ask to the
+    /// user instead of us hard-coding a string into the chat.
+    private static func noApiKeyMessage(for functionName: String) -> MessageStruct {
+        let content = KeyStore.missingKeyInstruction(
+            for: [.exa],
+            purpose: "web search (Exa). A free key is available at https://exa.ai"
+        )
+        return MessageStruct(role: "function", content: content, name: functionName)
     }
 }

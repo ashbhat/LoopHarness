@@ -41,6 +41,11 @@ class SideDrawerViewController: UIViewController {
     }
     private var mode: Mode = .conversations
 
+    /// Optional override applied during `setupUI()` before the persisted tab
+    /// would otherwise be restored. NavigationSkill sets this when the model
+    /// asks to open the drawer focused on a specific tab.
+    var pendingInitialTab: String?
+
     /// Map a segmented-control index to a mode. Centralised so the restore
     /// path and the value-changed handler can't drift apart.
     private func mode(forSegmentIndex index: Int) -> Mode {
@@ -48,6 +53,35 @@ class SideDrawerViewController: UIViewController {
         case 1:  return .files
         case 2:  return .skills
         default: return .conversations
+        }
+    }
+
+    /// Inverse of `mode(forSegmentIndex:)` for the tab-string API used by
+    /// NavigationSkill. Returns `nil` for unknown strings so callers can
+    /// silently fall back to the restored selection.
+    private static func segmentIndex(forTab tab: String) -> Int? {
+        switch tab.lowercased() {
+        case "conversations", "history": return 0
+        case "files", "workspace":       return 1
+        case "skills":                   return 2
+        default:                         return nil
+        }
+    }
+
+    /// Switch the drawer to the given tab. Safe to call before or after the
+    /// view has loaded — if called pre-load it just stashes the request in
+    /// `pendingInitialTab`; if called post-load it updates the segmented
+    /// control and rebuilds rows immediately.
+    func selectTab(_ tab: String) {
+        guard let index = Self.segmentIndex(forTab: tab) else { return }
+        if isViewLoaded {
+            segmentedControl.selectedSegmentIndex = index
+            UserDefaults.standard.set(index, forKey: Self.selectedTabDefaultsKey)
+            mode = mode(forSegmentIndex: index)
+            rebuildRows(for: mode)
+            tableView.reloadData()
+        } else {
+            pendingInitialTab = tab
         }
     }
 
@@ -144,19 +178,48 @@ class SideDrawerViewController: UIViewController {
         overlayView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(overlayView)
         
-        // Setup container
-        containerView.backgroundColor = UIColor.systemBackground
+        // Setup container. `secondarySystemBackground` is the standard iOS
+        // dark-gray (~#1C1C1E in dark mode, off-white in light mode) used for
+        // grouped sheets / sidebars — it gives clean contrast against the
+        // chat surface behind it, which is pure systemBackground. The old
+        // `systemBackground` here made the drawer indistinguishable from
+        // the chat in dark mode.
+        containerView.backgroundColor = UIColor.secondarySystemBackground
         containerView.translatesAutoresizingMaskIntoConstraints = false
         containerView.layer.shadowColor = UIColor.black.cgColor
         containerView.layer.shadowOffset = CGSize(width: 2, height: 0)
         containerView.layer.shadowRadius = 10
-        containerView.layer.shadowOpacity = 0.3
+        containerView.layer.shadowOpacity = 0.5
         view.addSubview(containerView)
-        
-        // Setup navigation bar
+
+        // Hairline at the trailing edge so even when the shadow is washed
+        // out (low ambient brightness, OLED black), there's a crisp visual
+        // delimiter between the drawer and the chat behind it.
+        let trailingHairline = UIView()
+        trailingHairline.translatesAutoresizingMaskIntoConstraints = false
+        trailingHairline.backgroundColor = UIColor.separator
+        containerView.addSubview(trailingHairline)
+        NSLayoutConstraint.activate([
+            trailingHairline.topAnchor.constraint(equalTo: containerView.topAnchor),
+            trailingHairline.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            trailingHairline.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            trailingHairline.widthAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale),
+        ])
+
+        // Setup navigation bar — match the drawer's elevated gray. Use the
+        // modern UINavigationBarAppearance so the bar's background reliably
+        // tracks `secondarySystemBackground` (the older barTintColor /
+        // background-image dance is unreliable on iOS 15+); set the same
+        // appearance on standard, compact and scrollEdge so it doesn't flip
+        // back to the system default when the table is scrolled.
         navigationBar.translatesAutoresizingMaskIntoConstraints = false
-        navigationBar.backgroundColor = UIColor.systemBackground
-        navigationBar.barTintColor = UIColor.systemBackground
+        let barAppearance = UINavigationBarAppearance()
+        barAppearance.configureWithOpaqueBackground()
+        barAppearance.backgroundColor = UIColor.secondarySystemBackground
+        barAppearance.shadowColor = .clear
+        navigationBar.standardAppearance = barAppearance
+        navigationBar.scrollEdgeAppearance = barAppearance
+        navigationBar.compactAppearance = barAppearance
         navigationBar.isTranslucent = false
         containerView.addSubview(navigationBar)
         
@@ -166,7 +229,17 @@ class SideDrawerViewController: UIViewController {
         // Restore the last-selected tab. Clamp to the valid range in case the
         // segment count ever shrinks below a previously stored index.
         let storedIndex = UserDefaults.standard.integer(forKey: Self.selectedTabDefaultsKey)
-        let restoredIndex = min(max(storedIndex, 0), segmentedControl.numberOfSegments - 1)
+        // If something requested a specific tab before view-load (NavigationSkill),
+        // honor it here so we open on that tab instead of the persisted one.
+        // Don't overwrite the persisted preference — this is a one-shot override.
+        let resolvedIndex: Int
+        if let tab = pendingInitialTab, let forced = Self.segmentIndex(forTab: tab) {
+            resolvedIndex = forced
+            pendingInitialTab = nil
+        } else {
+            resolvedIndex = storedIndex
+        }
+        let restoredIndex = min(max(resolvedIndex, 0), segmentedControl.numberOfSegments - 1)
         segmentedControl.selectedSegmentIndex = restoredIndex
         mode = mode(forSegmentIndex: restoredIndex)
         rebuildRows(for: mode)
@@ -964,13 +1037,18 @@ class ConversationCell: UITableViewCell {
         formatter.timeStyle = .short
         timestampLabel.text = formatter.string(from: conversation.timestamp)
         
-        // Highlight current conversation
+        // Highlight current conversation. Bumped from 0.1 → 0.22 so the
+        // tint reads against the drawer's `secondarySystemBackground` —
+        // 0.1 was calibrated for a black drawer and disappeared once the
+        // panel became dark gray.
         if isCurrent {
-            backgroundColor = UIColor.systemBlue.withAlphaComponent(0.1)
+            backgroundColor = UIColor.systemBlue.withAlphaComponent(0.22)
             titleLabel.textColor = .systemBlue
+            titleLabel.font = UIFont.systemFont(ofSize: 16, weight: .semibold)
         } else {
             backgroundColor = .clear
             titleLabel.textColor = .label
+            titleLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
         }
     }
 }

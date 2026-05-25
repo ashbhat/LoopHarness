@@ -123,10 +123,67 @@ final class IntegrationsVC: UIViewController {
                 handler: nil
             ),
             slackIntegration(),
+            githubIntegration(),
             devinIntegration(),
         ]
 
         tableView.reloadData()
+    }
+
+    /// GitHub. Token-backed via a Personal Access Token in Settings → Keys
+    /// (`githubPAT`). The Enterprise base URL is optional — connection state
+    /// is just "did the user paste a `github_pat_…` / `ghp_…` token?", and
+    /// the editor surfaces the base URL field next to the PAT for the rare
+    /// user on GHES.
+    private func githubIntegration() -> Integration {
+        let hasToken = !((KeyStore.shared.value(for: .githubPAT) ?? "").isEmpty)
+        return Integration(
+            title: "GitHub",
+            subtitle: hasToken
+                ? "Connected · personal access token"
+                : "Tap to paste your GitHub PAT (read repos, PRs, issues)",
+            icon: "chevron.left.forwardslash.chevron.right",
+            tint: .label,
+            status: hasToken ? .connected : .notConnected,
+            handler: { vc in vc.handleGitHubTap() }
+        )
+    }
+
+    private func handleGitHubTap() {
+        let hasToken = !((KeyStore.shared.value(for: .githubPAT) ?? "").isEmpty)
+        guard hasToken else {
+            pushGitHubKeyEditor(.githubPAT)
+            return
+        }
+        // Connected. Offer to edit either the PAT or the optional GHES base
+        // URL — same shape as the Devin row, which similarly has a primary
+        // credential + an optional secondary field.
+        let alert = UIAlertController(
+            title: "GitHub connected",
+            message: "Loop can read repos, PRs, issues, and notifications via your personal access token. You can replace either credential below.",
+            preferredStyle: .actionSheet
+        )
+        alert.addAction(UIAlertAction(title: "Edit Access Token", style: .default) { [weak self] _ in
+            self?.pushGitHubKeyEditor(.githubPAT)
+        })
+        alert.addAction(UIAlertAction(title: "Edit Base URL (Enterprise)", style: .default) { [weak self] _ in
+            self?.pushGitHubKeyEditor(.githubBaseURL)
+        })
+        alert.addAction(UIAlertAction(title: "Done", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+            popover.permittedArrowDirections = []
+        }
+        present(alert, animated: true)
+    }
+
+    private func pushGitHubKeyEditor(_ key: KeyStore.Key) {
+        guard let nav = navigationController else { return }
+        var stack = nav.viewControllers
+        stack.append(KeysVC())
+        stack.append(KeyEditVC(focusing: key))
+        nav.setViewControllers(stack, animated: true)
     }
 
     /// Devin coding agent. Connection state is "did the user paste BOTH a

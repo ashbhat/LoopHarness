@@ -46,6 +46,11 @@ final class VisionSession {
     /// Bumps whenever the visible turn changes (new user/assistant text or a
     /// conversation switch) so the window can re-read the persisted store.
     private(set) var turnCounter: Int = 0
+    /// Bumps whenever a sub-agent — native, Devin, or Cursor — changes state.
+    /// The conversation window's status pill binds on this so the running
+    /// count, dot color, and list refresh in place. Separate from turnCounter
+    /// because most sub-agent updates don't change the visible transcript.
+    private(set) var subAgentTick: Int = 0
 
     private let coordinator = VisionVoiceCoordinator()
 
@@ -102,6 +107,19 @@ final class VisionSession {
             forName: .cursorAgentDidPostMessage, object: nil, queue: .main, using: bump))
         notificationObservers.append(NotificationCenter.default.addObserver(
             forName: .devinAgentDidPostMessage, object: nil, queue: .main, using: bump))
+
+        // Sub-agent state changes (spawn, status flip, new transcript message)
+        // don't necessarily touch the visible conversation — but the pill and
+        // inspector sheet bind on `subAgentTick` to refresh their counts/rows.
+        let tick: (Notification) -> Void = { [weak self] _ in
+            self?.subAgentTick &+= 1
+        }
+        notificationObservers.append(NotificationCenter.default.addObserver(
+            forName: .subAgentsDidChange, object: nil, queue: .main, using: tick))
+        notificationObservers.append(NotificationCenter.default.addObserver(
+            forName: .devinAgentsDidChange, object: nil, queue: .main, using: tick))
+        notificationObservers.append(NotificationCenter.default.addObserver(
+            forName: .cursorAgentsDidChange, object: nil, queue: .main, using: tick))
     }
 
     deinit {

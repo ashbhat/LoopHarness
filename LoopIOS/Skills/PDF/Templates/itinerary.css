@@ -1,0 +1,173 @@
+@page {
+    size: Letter;
+    margin: 0.75in 0.75in 0.95in 0.75in;
+    @bottom-center {
+        content: "— " counter(page) " —";
+        font-family: -apple-system, "Helvetica Neue", sans-serif;
+        font-size: 9pt;
+        color: #999;
+    }
+}
+@page :first {
+    margin: 0;
+    @bottom-center { content: none; }
+}
+
+* { box-sizing: border-box; -webkit-print-color-adjust: exact; }
+
+html, body {
+    font-family: -apple-system, "Helvetica Neue", "Inter", sans-serif;
+    font-size: 11pt;
+    line-height: 1.5;
+    color: #11161e;
+    margin: 0;
+    padding: 0;
+}
+
+.cover {
+    page-break-after: always;
+    height: 100vh;
+    padding: 1.3in 0.9in 0.9in 0.9in;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    background:
+        linear-gradient(135deg, #0d2a4a 0%, #1b4d7a 55%, #2d7fb8 100%);
+    color: #f4f7fb;
+}
+.cover-eyebrow {
+    font-size: 10pt;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(244,247,251,0.7);
+    margin: 0;
+}
+.cover-title {
+    font-size: 40pt;
+    font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+    margin: 0.3in 0 0 0;
+    max-width: 6.4in;
+}
+.cover-meta {
+    font-size: 10.5pt;
+    color: rgba(244,247,251,0.85);
+    border-top: 1px solid rgba(244,247,251,0.25);
+    padding-top: 14pt;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+.cover-meta .brand { font-weight: 700; color: #fff; letter-spacing: 0.04em; }
+
+.body { padding: 0; }
+
+h2 {
+    font-size: 18pt;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+    color: #0d2a4a;
+    margin: 18pt 0 8pt 0;
+    padding: 6pt 0 4pt 0;
+    border-bottom: 2px solid #2d7fb8;
+    page-break-before: page;
+    break-before: page;
+    page-break-after: avoid;
+    break-after: avoid-page;
+}
+.body > h2:first-of-type {
+    page-break-before: avoid;
+    break-before: avoid;
+}
+
+h3 {
+    font-size: 12pt;
+    font-weight: 600;
+    color: #1b4d7a;
+    margin: 14pt 0 4pt 0;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+p { margin: 0 0 8pt 0; orphans: 3; widows: 3; }
+
+ul, ol {
+    margin: 0 0 10pt 0;
+    padding-left: 0;
+    list-style: none;
+}
+li {
+    position: relative;
+    padding: 6pt 0 6pt 22pt;
+    margin: 0;
+    border-bottom: 1px solid rgba(13,42,74,0.08);
+    page-break-inside: avoid;
+    break-inside: avoid-page;
+}
+li::before {
+    content: "●";
+    color: #2d7fb8;
+    position: absolute;
+    left: 6pt;
+    top: 6pt;
+    font-size: 9pt;
+}
+
+/* Time-prefix convention: lines starting with `HH:MM —` get the time pulled
+   into a left rail when the model uses the `<strong>HH:MM</strong>` pattern. */
+li strong:first-child {
+    display: inline-block;
+    min-width: 56pt;
+    color: #0d2a4a;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+blockquote {
+    margin: 10pt 0;
+    padding: 8pt 14pt;
+    border-left: 3px solid #2d7fb8;
+    background: #eef4fa;
+    color: #11161e;
+    page-break-inside: avoid;
+    break-inside: avoid-page;
+}
+
+a { color: #1b4d7a; text-decoration: underline; }
+a:hover { color: #0d2a4a; }
+
+hr { border: 0; border-top: 1px dashed rgba(13,42,74,0.25); margin: 16pt 0; }
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10pt 0;
+    font-size: 10pt;
+    page-break-inside: avoid;
+    break-inside: avoid-page;
+}
+th, td {
+    border: 1px solid rgba(13,42,74,0.12);
+    padding: 6pt 8pt;
+    text-align: left;
+}
+th {
+    background: #eef4fa;
+    text-transform: uppercase;
+    font-size: 9pt;
+    letter-spacing: 0.05em;
+    color: #0d2a4a;
+}
+
+code {
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 10pt;
+    background: #eef4fa;
+    padding: 1pt 4pt;
+    border-radius: 3pt;
+}
+
+img { max-width: 100%; height: auto; border-radius: 6pt; }
+figure { margin: 12pt 0; text-align: center; page-break-inside: avoid; break-inside: avoid-page; }
+figcaption { font-size: 9pt; color: #4a5b73; margin-top: 5pt; }

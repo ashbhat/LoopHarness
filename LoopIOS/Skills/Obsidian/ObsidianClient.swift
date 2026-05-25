@@ -166,7 +166,7 @@ struct ObsidianClient {
         guard let base = ObsidianClient.baseURL,
               let key = ObsidianClient.apiKey else {
             completion(nil, NSError(domain: "ObsidianClient", code: -1,
-                                    userInfo: [NSLocalizedDescriptionKey: "OBSIDIAN_BASE_URL or OBSIDIAN_API_KEY missing from Info.plist"]))
+                                    userInfo: [NSLocalizedDescriptionKey: "Obsidian relay isn't configured."]))
             return
         }
         guard var components = URLComponents(string: base + path) else {

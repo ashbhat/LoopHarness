@@ -18,6 +18,18 @@ class MainVC: MessagingVC {
     /// running indicator from that point on.
     private(set) var heroAvatar: AvatarView?
 
+    /// Tracks the previous empty/non-empty state of the conversation so
+    /// `refreshAvatarVisibility` only runs the 3D pop on actual transitions.
+    /// The initial viewDidLoad call passes `animated: false` regardless;
+    /// later calls run the pop when this flips.
+    private var lastVisibilityEmpty: Bool?
+
+    /// Retained transitioning delegate that drives the 3D pop between the
+    /// nav-bar avatar and `AgentLargeVC`. UIKit holds it weakly during a
+    /// presentation, so MainVC keeps the strong reference alive across
+    /// present and dismiss.
+    private var avatarTransition: AvatarPopTransitionDelegate?
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -26,14 +38,11 @@ class MainVC: MessagingVC {
 
         wireAvatarToVoiceLoop()
 
-        // Initial visibility — the hero owns the empty state, the nav-bar
-        // avatar owns the conversation state. Exactly one is shown at a time.
-        let hasConversation = self.messages.count > 1
-        if hasConversation {
-            heroAvatar?.isHidden = true
-            heroAvatar?.alpha = 0
-        }
-        setNavAvatarVisible(hasConversation)
+        // Hero owns the empty state, nav-bar avatar owns the conversation
+        // state. Exactly one is shown at a time, driven by whether there's
+        // anything visible in the chat (system message and other invisibles
+        // don't count — onboarding cards do).
+        refreshAvatarVisibility(animated: false)
     }
 
     /// Builds the navigation bar's titleView: just the AvatarView, sized to
@@ -71,13 +80,23 @@ class MainVC: MessagingVC {
         self.avatar = av
     }
 
-    /// Push the immersive agent view as a full-screen modal. Crossfade so the
-    /// nav-bar orb visually expands into the hero orb — both are the same
-    /// component, just at different sizes.
-    @objc private func presentAgentLargeView() {
+    /// Push the immersive agent view as a full-screen modal. Uses a custom
+    /// `AvatarPopTransitionDelegate` so the small nav-bar orb visually
+    /// "pops" through space into the AgentLargeView's 300pt hero orb,
+    /// rather than the old plain crossfade. The same delegate drives the
+    /// reverse pop on dismiss.
+    @objc func presentAgentLargeView() {
         let vc = AgentLargeVC()
         vc.modalPresentationStyle = .fullScreen
-        vc.modalTransitionStyle = .crossDissolve
+        let delegate = AvatarPopTransitionDelegate(sourceAvatar: avatar) { presented in
+            (presented as? AgentLargeVC)?.agentView.avatar
+        }
+        vc.transitioningDelegate = delegate
+        // Loading the view here forces AgentLargeView (and its avatar) into
+        // existence before the animator runs — the present animator samples
+        // the destination avatar's frame inside `animateTransition`.
+        _ = vc.view
+        self.avatarTransition = delegate
         present(vc, animated: true)
     }
 
@@ -182,35 +201,97 @@ class MainVC: MessagingVC {
 
     override func keyboardWillShow(_ notification: Notification) {
         super.keyboardWillShow(notification)
-        setHeroVisible(false)
+        // Intentionally don't touch hero visibility here — the hero owns the
+        // empty-state slot until the user actually sends a message, and
+        // making it vanish just because they tapped into the message box
+        // reads as "the orb is broken." The `safeAreaLayoutGuide` center
+        // the hero is pinned to already shifts up with the keyboard, so it
+        // floats clear of the input bar on its own. Visibility flips happen
+        // in `refreshAvatarVisibility`, driven off `visible_messages`.
     }
 
     override func keyboardWillHide(_ notification: Notification) {
         super.keyboardWillHide(notification)
-        if self.messages.count <= 1 {
-            setHeroVisible(true)
-        }
+        // Counterpart no-op — `refreshAvatarVisibility` is the single source
+        // of truth for hero on/off, and it's already correct (visible while
+        // `visible_messages.isEmpty`). Forcing visibility here was only
+        // needed to undo the keyboardWillShow hide we removed above.
     }
 
     override func rightBarButtonTapped() {
         super.rightBarButtonTapped()
-        if self.messages.count <= 1 && !self.messageBox.textView.isFirstResponder {
-            setHeroVisible(true)
-            setNavAvatarVisible(false)
-        }
+        refreshAvatarVisibility()
     }
 
     override func newMessageSent() {
-        if self.messages.count > 1 {
-            setHeroVisible(false)
-            setNavAvatarVisible(true)
-        }
+        refreshAvatarVisibility()
     }
 
     override func loadConversation(_ conversation: SimpleConversation) {
         super.loadConversation(conversation)
-        let hasConversation = self.messages.count > 1
-        setHeroVisible(!hasConversation)
-        setNavAvatarVisible(hasConversation)
+        refreshAvatarVisibility()
+    }
+
+    /// Single source of truth for hero ↔ nav-avatar handoff. The hero owns
+    /// the empty state; once anything visible lands in the chat (a real
+    /// message, an onboarding card, an attachment bubble), it collapses into
+    /// the nav-bar avatar. Driven off `visible_messages` so the system
+    /// message and bare function calls don't count as "there's a chat."
+    ///
+    /// On a real state transition (and when motion isn't reduced) we run a
+    /// 3D "pop" via `AvatarPopAnimator` so the orb appears to fly between
+    /// the two slots. Initial visibility, Reduce Motion, and non-animated
+    /// callers take the plain alpha-fade path.
+    private func refreshAvatarVisibility(animated: Bool = true) {
+        let isEmpty = self.visible_messages.isEmpty
+        let previous = lastVisibilityEmpty
+        lastVisibilityEmpty = isEmpty
+
+        let isInitial = (previous == nil)
+        let changed = previous != isEmpty
+        let canPop = animated
+            && changed
+            && !isInitial
+            && !UIAccessibility.isReduceMotionEnabled
+            && view.window != nil
+
+        guard canPop else {
+            setHeroVisible(isEmpty, animated: animated && !isInitial)
+            setNavAvatarVisible(!isEmpty, animated: animated && !isInitial)
+            return
+        }
+
+        // Make sure both avatars are present in the view hierarchy with the
+        // right alpha before sampling frames — they're the source/dest of
+        // the snapshot flight, and a hidden-but-alpha-0 view still has a
+        // valid frame, but `isHidden = true` collapses some hit-testing
+        // pieces we rely on for `convert(_:to:)`.
+        heroAvatar?.isHidden = false
+        avatar?.isHidden = false
+        heroAvatar?.alpha = 1
+        avatar?.alpha = 1
+        view.layoutIfNeeded()
+        navigationController?.navigationBar.layoutIfNeeded()
+
+        guard let hero = heroAvatar,
+              let nav = avatar,
+              let window = view.window
+        else {
+            setHeroVisible(isEmpty, animated: true)
+            setNavAvatarVisible(!isEmpty, animated: true)
+            return
+        }
+
+        let source: UIView = isEmpty ? nav : hero
+        let dest: UIView   = isEmpty ? hero : nav
+
+        AvatarPopAnimator.play(from: source, to: dest, in: window) { [weak self] in
+            guard let self = self else { return }
+            // Final visibility: hero shows on empty, nav-bar shows on
+            // non-empty. The animator restored isHidden on both, so we set
+            // the canonical end state here without re-animating.
+            self.setHeroVisible(isEmpty, animated: false)
+            self.setNavAvatarVisible(!isEmpty, animated: false)
+        }
     }
 }

@@ -105,7 +105,7 @@ final class ImageGenerationService {
 
     private func startNetworkRequest(attachment: ImageAttachment) {
         guard let apiKey = ImageGenerationService.openAIAPIKey else {
-            deliverFailure(message: "OPENAI_API_KEY missing from Info.plist",
+            deliverFailure(message: "No OpenAI API key is configured. Add one in Settings → Keys → OpenAI and the app will store it securely in the iOS Keychain on-device.",
                            attachment: attachment)
             return
         }

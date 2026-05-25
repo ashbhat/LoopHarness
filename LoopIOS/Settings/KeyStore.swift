@@ -168,6 +168,31 @@ final class KeyStore {
         }
     }
 
+    /// Model-facing instruction returned when a skill needs a key the user
+    /// hasn't configured yet. Skills wrap this string in a function-role
+    /// result; the model then phrases the ask to the user in its own voice,
+    /// promising the value will be stored securely in the iOS Keychain
+    /// on-device. Centralised so every "missing key" path says the same
+    /// thing in the same tone.
+    static func missingKeyInstruction(for keys: [Key], purpose: String) -> String {
+        let names: String
+        switch keys.count {
+        case 0:  names = "an API key"
+        case 1:  names = "a \(keys[0].displayName)"
+        case 2:  names = "a \(keys[0].displayName) and a \(keys[1].displayName)"
+        default:
+            let head = keys.dropLast().map { $0.displayName }.joined(separator: ", ")
+            names = "a \(head), and a \(keys.last!.displayName)"
+        }
+        return """
+        No API key is configured for \(purpose). Tell the user — in your own \
+        words — that you don't currently have a way to do that, but if they \
+        give you \(names), the app will store it securely in the iOS Keychain \
+        on-device and you'll be able to help. They can add it in \
+        Settings → Keys. Do not retry the tool until they've added a key.
+        """
+    }
+
     static let shared = KeyStore()
 
     /// Posted after a write so live screens (key list, in-flight clients)
