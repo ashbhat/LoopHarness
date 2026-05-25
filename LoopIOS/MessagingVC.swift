@@ -369,6 +369,7 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
         // SlackSkill needs a UI host so write tools can present a
         // confirmation alert before chat.postMessage fires.
         SlackSkill.shared.host = self
+        TwitterSkill.shared.host = self
         // GitHubSkill uses the same pattern for merge/review/comment/create
         // tools — each one pops a confirmation alert before the API call.
         GitHubSkill.shared.host = self
@@ -1065,6 +1066,7 @@ extension MessagingVC: MessageBoxDelegate {
         if let s = GitHubSkill.shared.statusText(for: call) { return s }
         if let s = DevinSkill.shared.statusText(for: call) { return s }
         if let s = NavigationSkill.shared.statusText(for: call) { return s }
+        if let s = TwitterSkill.shared.statusText(for: call) { return s }
         if let s = DynamicSkillRegistry.shared.statusText(for: call) { return s }
 
         switch call.name {
@@ -2934,6 +2936,29 @@ extension MessagingVC: SlackSkillHost {
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Send", style: .default) { _ in
+            completion(true)
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
+            completion(false)
+        })
+        present(alert, animated: true)
+    }
+}
+
+// MARK: - TwitterSkillHost
+
+extension MessagingVC: TwitterSkillHost {
+    /// Present a UIAlertController with the proposed tweet so the user can
+    /// review and approve before POST /2/tweets fires. The user's Post tap
+    /// IS the confirmation checkpoint — no second ask in chat is needed.
+    func twitterSkill(requestPostConfirmation text: String,
+                      completion: @escaping (Bool) -> Void) {
+        let alert = UIAlertController(
+            title: "Post this tweet?",
+            message: text,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Post", style: .default) { _ in
             completion(true)
         })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
