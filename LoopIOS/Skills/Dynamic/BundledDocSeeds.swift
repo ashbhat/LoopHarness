@@ -147,7 +147,9 @@ it can reach every tool the main chat can. It has a hard budget (25 turns /
 300 seconds), cannot spawn further sub-agents, and posts a single summary back
 into the parent conversation when it finishes. A `coding` sub-agent gets a
 coding-focused prompt and is meant to operate on a repository cloned into the
-Workspace (read/edit files, check git status).
+Workspace (read/edit files, check git status). The user (or the primary agent)
+can cancel a running sub-agent via `cancel_sub_agent(id)` — this marks it as
+failed and the runtime loop exits on the next turn check.
 
 ## Cloud
 
