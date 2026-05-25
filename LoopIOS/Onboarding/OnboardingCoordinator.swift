@@ -489,12 +489,13 @@ final class OnboardingCoordinator {
     // MARK: - State machine
 
     private func advance(to step: StepID) {
-        // Platforms without an Action Button skip that whole step. The Mac
-        // and Vision hosts set `skipActionButtonStep = true`; iOS leaves it
-        // false so the walkthrough still appears. Done here (not at each
-        // call site) so all the existing `advance(to: .actionButton)` paths
-        // route through one place.
-        let actualStep: StepID = (step == .actionButton && skipActionButtonStep) ? .done : step
+        // Platforms without an Action Button skip that whole step but still
+        // need to ask the user what to call the assistant. The Mac and Vision
+        // hosts set `skipActionButtonStep = true`; iOS leaves it false so the
+        // walkthrough still appears (and routes to `.askName` itself when the
+        // user skips it). Done here (not at each call site) so all the
+        // existing `advance(to: .actionButton)` paths route through one place.
+        let actualStep: StepID = (step == .actionButton && skipActionButtonStep) ? .askName : step
         currentStep = actualStep
         post(actualStep)
         // `.done` is the final step — there's no chip and no follow-up
@@ -502,6 +503,11 @@ final class OnboardingCoordinator {
         // next typed message should hit the real LLM. Calling `complete()`
         // immediately after the post flips `OnboardingState.isComplete`
         // before `handleUserText` runs again.
+        //
+        // Note: this branch only fires when callers explicitly request
+        // `.done` — `.actionButton` is rerouted to `.askName` above on
+        // platforms that skip the action button, so the name prompt always
+        // runs before we land here.
         if actualStep == .done {
             complete()
         }
