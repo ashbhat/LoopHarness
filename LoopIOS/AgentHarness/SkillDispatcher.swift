@@ -151,6 +151,14 @@ final class SkillDispatcher {
             return
         }
 
+        // Remote MCP tools installed via Settings → Skills. Names are
+        // namespaced `<server>__<tool>` so they can't collide with anything
+        // checked above.
+        if MCPRegistry.shared.handles(functionName: call.name) {
+            MCPRegistry.shared.handle(functionCall: call, completion: completion)
+            return
+        }
+
         // Unknown — synthesize a structured error the model can read.
         completion(MessageStruct(
             role: "function",

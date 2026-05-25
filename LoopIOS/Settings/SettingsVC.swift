@@ -34,6 +34,9 @@ final class SettingsVC: UIViewController {
             Row(title: "Integrations", icon: "puzzlepiece.extension.fill") { settings in
                 settings.navigationController?.pushViewController(IntegrationsVC(), animated: true)
             },
+            Row(title: "Skills", icon: "sparkles") { settings in
+                settings.navigationController?.pushViewController(SkillsVC(), animated: true)
+            },
             Row(title: "Scheduled", icon: "calendar.badge.clock") { settings in
                 settings.navigationController?.pushViewController(ScheduledTasksVC(), animated: true)
             },

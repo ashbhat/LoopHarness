@@ -1,0 +1,44 @@
+# website/
+
+Static landing page for **loopharness.com**. Zero build step — plain HTML/CSS/JS.
+
+## Files
+
+- `index.html` — single-page site (hero, surfaces, skills, memory, OSS, footer)
+- `styles.css` — all styles as CSS custom properties + media queries
+- `orb.js` — canvas pixel-orb (port of `LoopIOS/HelperViews/AvatarView.swift`)
+- `site.js` — tab switcher + hold-to-talk interaction
+- `vercel.json` — clean URLs, no trailing slash
+
+## Local preview
+
+```sh
+python3 -m http.server -d website 8080
+# open http://localhost:8080
+```
+
+Or just `open website/index.html` — everything works on `file://`.
+
+## Deploy to Vercel
+
+1. Import this repo in the Vercel dashboard.
+2. Set **Root Directory** = `website`.
+3. **Framework Preset** = "Other".
+4. Leave Build Command and Output Directory blank.
+5. Deploy. Point `loopharness.com` at the project under Domains.
+
+That's it — no Node, no install, no build.
+
+## What to edit
+
+- **Real download links:** when TestFlight and a signed Mac build exist, replace the two `https://github.com/.../#setup` URLs in `index.html` (nav `Get the app`, hero CTAs).
+- **Copy:** all text is in `index.html`. Headlines and section structure were iterated with the designer in the handoff; keep them unless you have a specific reason to change.
+- **Skills grid:** 12 cards in `index.html`. Add more by copying any `.skill` block.
+
+## What the orb mirrors
+
+- 25-cell square grid · 5 quantized brightness levels
+- Idle palette `rgb(217, 222, 235)` (matches `UIColor.label` light variant)
+- Idle breathe: `sin(t · 1.4) · 0.066 · r`
+- Listening palette `rgb(51, 199, 255)` (systemCyan) — engaged by the hold-to-talk strip
+- Web-only extras: cursor-lean + click ripple (the native app uses real mic amplitude instead)
