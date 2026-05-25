@@ -16,12 +16,12 @@ import Foundation
 
 #if canImport(UIKit)
 import UIKit
-private typealias PlatformColor = UIColor
-private typealias PlatformFont = UIFont
+typealias PlatformColor = UIColor
+typealias PlatformFont = UIFont
 #elseif canImport(AppKit)
 import AppKit
-private typealias PlatformColor = NSColor
-private typealias PlatformFont = NSFont
+typealias PlatformColor = NSColor
+typealias PlatformFont = NSFont
 #endif
 
 // MARK: - Public API

@@ -26,17 +26,22 @@ protocol MacOnboardingChipDelegate: AnyObject {
 enum MacOnboardingChipBubble {
 
     /// Build the assistant bubble row for an onboarding message. The prose
-    /// renders the same as a regular assistant bubble; the chip row sits
-    /// under it inside the same vertical column.
+    /// renders the same as a regular assistant bubble — including markdown
+    /// (`**bold**`, headings, inline code) via `ConversationWindowController`'s
+    /// shared attributed-string builder — and the chip row sits under it
+    /// inside the same vertical column.
     static func makeBubble(text: String,
                            card: OnboardingCardKind,
                            delegate: MacOnboardingChipDelegate?) -> NSView {
         let bubble = NSView()
         bubble.translatesAutoresizingMaskIntoConstraints = false
 
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.font = NSFont.systemFont(ofSize: 14)
-        label.textColor = .labelColor
+        // Use the same text view + markdown renderer as regular assistant
+        // bubbles so `**Pick a voice**` style copy doesn't render with raw
+        // asterisks on the Mac onboarding script.
+        let label = ChatLinkTextView.makeBubbleTextView(maxTextWidth: 380 - 8)
+        label.textStorage?.setAttributedString(
+            ConversationWindowController.markdownAttributedString(from: text))
         label.translatesAutoresizingMaskIntoConstraints = false
 
         bubble.addSubview(label)

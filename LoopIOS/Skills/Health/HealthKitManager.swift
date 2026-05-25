@@ -48,15 +48,39 @@ final class HealthKitManager {
         return types
     }()
 
-    private init() {}
+    private init() {
+        // If the user authorized in a previous app version (before we
+        // started persisting `hasRequestedAuthorization`), iOS still
+        // remembers the prompt was answered — `getRequestStatusForAuthorization`
+        // returns `.unnecessary` for the requested types. Backfill the flag
+        // so the agent recognises access without forcing the user to re-tap
+        // "Connect Apple Health".
+        if !hasRequestedAuthorization, HKHealthStore.isHealthDataAvailable() {
+            store.getRequestStatusForAuthorization(toShare: [], read: Self.readTypes) { [weak self] status, _ in
+                if status == .unnecessary {
+                    self?.hasRequestedAuthorization = true
+                }
+            }
+        }
+    }
 
     // MARK: - Authorisation
 
-    /// Current combined authorisation status. HealthKit does not expose a
-    /// single aggregate status; we derive one by checking `isHealthDataAvailable`
-    /// and the per-type `authorizationStatus`. If any requested type has been
-    /// denied the user sees `.denied`; if at least one is authorised (and none
-    /// denied) we report `.authorized`. Otherwise `.notDetermined`.
+    /// Current combined authorisation status.
+    ///
+    /// iOS gotcha: `HKHealthStore.authorizationStatus(for:)` deliberately
+    /// returns `.sharingDenied` for *read-only* requests regardless of
+    /// whether the user granted access — Apple's design prevents apps from
+    /// inferring user data from auth state. The status API is only meaningful
+    /// for share/write permissions. Since Loop only requests read access,
+    /// the per-type status is useless for "did the user grant read".
+    ///
+    /// The best signal we have is "have we successfully presented the
+    /// HealthKit prompt at least once". We persist that as a UserDefaults
+    /// flag set when `requestAuthorization` completes without error.
+    /// After that, we treat the integration as `.authorized` — actual
+    /// per-type denial just shows up as empty query results, which the
+    /// agent surfaces honestly as "no data".
     enum AuthStatus: String {
         case authorized
         case denied
@@ -64,25 +88,24 @@ final class HealthKitManager {
         case unavailable
     }
 
+    private static let hasRequestedKey = "HealthKit.hasRequestedAuthorization"
+
+    private var hasRequestedAuthorization: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.hasRequestedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.hasRequestedKey) }
+    }
+
     var currentAuthorizationStatus: AuthStatus {
         guard HKHealthStore.isHealthDataAvailable() else { return .unavailable }
-        var hasDenied = false
-        var hasAuthorized = false
-        for t in Self.readTypes {
-            switch store.authorizationStatus(for: t) {
-            case .sharingDenied:
-                hasDenied = true
-            case .sharingAuthorized:
-                hasAuthorized = true
-            case .notDetermined:
-                break
-            @unknown default:
-                break
-            }
+        // Any explicit `.sharingAuthorized` (only possible for share/write
+        // types — kept for future-proofing) counts as authorized.
+        for t in Self.readTypes
+        where store.authorizationStatus(for: t) == .sharingAuthorized {
+            return .authorized
         }
-        if hasDenied { return .denied }
-        if hasAuthorized { return .authorized }
-        return .notDetermined
+        // For read-only types iOS won't tell us if the user granted access.
+        // Fall back to "have we asked yet" — see comment on the enum.
+        return hasRequestedAuthorization ? .authorized : .notDetermined
     }
 
     func requestAuthorization(completion: @escaping (Bool, Error?) -> Void) {
@@ -90,7 +113,14 @@ final class HealthKitManager {
             completion(false, nil)
             return
         }
-        store.requestAuthorization(toShare: nil, read: Self.readTypes) { ok, err in
+        store.requestAuthorization(toShare: nil, read: Self.readTypes) { [weak self] ok, err in
+            // `ok == true` means the prompt completed without error, not
+            // that every type was granted. That's the only signal we get
+            // for read-only access — record it so subsequent queries are
+            // allowed through.
+            if ok, err == nil {
+                self?.hasRequestedAuthorization = true
+            }
             DispatchQueue.main.async { completion(ok, err) }
         }
     }
@@ -283,7 +313,8 @@ final class HealthKitManager {
         case .martialArts:           return "Martial Arts"
         case .wrestling:             return "Wrestling"
         case .surfingSports:         return "Surfing"
-        case .skiing:                return "Skiing"
+        case .downhillSkiing:        return "Downhill Skiing"
+        case .crossCountrySkiing:    return "Cross-Country Skiing"
         case .snowboarding:          return "Snowboarding"
         case .skatingSports:         return "Skating"
         case .paddleSports:          return "Paddle Sports"
