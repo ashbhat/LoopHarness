@@ -51,7 +51,7 @@ You can manage the user's integrations and API keys directly:
 - list_integrations: enumerate the integrations Loop knows about (Google Calendar via EventKit, Notion, Gmail, Slack, Apple Health) and their current connection state. Notion and Slack are token-backed (ntn_… integration token and xoxp- user token respectively, both stored in the Keychain) — status flips to "connected" once the user pastes the relevant key. Apple Health is OS-permission-backed (like Calendar).
 - connect_integration: kick off the connect flow for a named integration. For Google Calendar this triggers the OS permission prompt when status is undetermined; if access was previously denied, the tool returns a hint telling you to call open_integration_settings with target="calendar_privacy". For Slack, this returns a `needs_api_key` payload with instructions to walk the user through minting an xoxp- token and pasting it in Settings → Keys → Slack User Token.
 - open_integration_settings: surfaces the in-app Integrations panel (target="in_app", default) or the system Privacy pane (target="calendar_privacy"). Use this when the user says "open integrations" / "let me see my settings".
-- list_api_keys: reports which API keys are currently set (Deepgram, ElevenLabs, OpenAI, Exa, Cursor, Obsidian). Values are never returned — only whether each is present.
+- list_api_keys: reports which API keys are currently set (Deepgram, ElevenLabs, OpenAI, Exa, Cursor, Obsidian, Higgsfield, etc.). Values are never returned — only whether each is present.
 - set_api_key: store a value in the keychain. Accepts either the canonical name ("OPENAI_API_KEY") or a friendly alias ("openai"). IMPORTANT: voice transcription is lossy — always read the value back to the user character-by-character and confirm before calling this tool. If the user typed the value, you can call it directly.
 
 Tips:
@@ -85,7 +85,7 @@ Tips:
                     "properties": [
                         "name": [
                             "type": "string",
-                            "description": "Integration identifier. One of: calendar, notion, gmail, slack, health."
+                            "description": "Integration identifier. One of: calendar, notion, gmail, slack, health, higgsfield."
                         ]
                     ],
                     "required": ["name"]
@@ -135,7 +135,7 @@ Tips:
                     "properties": [
                         "name": [
                             "type": "string",
-                            "description": "Key identifier. Aliases accepted: openai, deepgram, elevenlabs, exa, cursor, obsidian_api, obsidian_base_url, obsidian_vault_name."
+                            "description": "Key identifier. Aliases accepted: openai, deepgram, elevenlabs, exa, cursor, obsidian_api, obsidian_base_url, obsidian_vault_name, higgsfield."
                         ],
                         "value": [
                             "type": "string",
@@ -255,6 +255,15 @@ Tips:
                 ? "Paste a personal xoxp- token in Settings → Keys → Slack User Token. The user can mint one at api.slack.com/apps with the scopes listed in Specs/3. Integrations Spec.md."
                 : "Connected via personal user token. Slack tools are live."
         ]
+        let hfKey = KeyStore.shared.value(for: .higgsfield) ?? ""
+        let higgsfield: [String: Any] = [
+            "name": "higgsfield",
+            "display_name": "Higgsfield",
+            "status": hfKey.isEmpty ? "not_connected" : "connected",
+            "hint": hfKey.isEmpty
+                ? "Paste KEY_ID:KEY_SECRET credentials from cloud.higgsfield.ai → API Keys in Settings → Keys → Higgsfield."
+                : "Connected via API key. Higgsfield video generation tools are live."
+        ]
         #if canImport(HealthKit) && os(iOS)
         let healthStatus = HealthKitManager.shared.currentAuthorizationStatus
         let health: [String: Any] = [
@@ -263,7 +272,7 @@ Tips:
             "status": healthStatus.rawValue,
             "hint": healthHint(healthStatus)
         ]
-        return [calendar, notion, gmail, slack, health]
+        return [calendar, notion, gmail, slack, health, higgsfield]
         #else
         let health: [String: Any] = [
             "name": "health",
@@ -271,7 +280,7 @@ Tips:
             "status": "unavailable",
             "hint": "HealthKit is not available on this platform."
         ]
-        return [calendar, notion, gmail, slack, health]
+        return [calendar, notion, gmail, slack, health, higgsfield]
         #endif
     }
 
@@ -424,11 +433,27 @@ Tips:
             ]))
             #endif
 
+        case "higgsfield":
+            let key = KeyStore.shared.value(for: .higgsfield) ?? ""
+            if !key.isEmpty {
+                completion(Self.functionMessage(name: toolName, payload: [
+                    "name": "higgsfield",
+                    "status": "already_connected",
+                    "message": "Higgsfield is already connected via API key. Video generation tools are live."
+                ]))
+            } else {
+                completion(Self.functionMessage(name: toolName, payload: [
+                    "name": "higgsfield",
+                    "status": "needs_api_key",
+                    "next_action": "Tell the user to paste their Higgsfield credentials (KEY_ID:KEY_SECRET format) in Settings \u{2192} Keys \u{2192} Higgsfield. They can create API keys at cloud.higgsfield.ai \u{2192} API Keys."
+                ]))
+            }
+
         default:
             completion(Self.functionMessage(name: toolName, payload: [
                 "error": "unknown_integration",
                 "name": which,
-                "hint": "Known integrations: calendar, notion, gmail, slack, health."
+                "hint": "Known integrations: calendar, notion, gmail, slack, health, higgsfield."
             ]))
         }
     }
@@ -506,6 +531,7 @@ Tips:
         case .xAPISecret:             return "x_api_secret"
         case .xAccessToken:           return "x_access_token"
         case .xAccessTokenSecret:     return "x_access_token_secret"
+        case .higgsfield:             return "higgsfield"
         }
     }
 
@@ -519,7 +545,7 @@ Tips:
             completion(Self.functionMessage(name: toolName, payload: [
                 "error": "unknown_key",
                 "name": name,
-                "hint": "Aliases accepted: openai, deepgram, elevenlabs, exa, cursor, obsidian_api, obsidian_base_url, obsidian_vault_name."
+                "hint": "Aliases accepted: openai, deepgram, elevenlabs, exa, cursor, obsidian_api, obsidian_base_url, obsidian_vault_name, higgsfield."
             ]))
             return
         }
@@ -566,6 +592,7 @@ Tips:
         case "x_access_token", "twitter_access_token":        return .xAccessToken
         case "x_access_token_secret",
              "twitter_access_token_secret":                   return .xAccessTokenSecret
+        case "higgsfield", "higgsfield_api_key":               return .higgsfield
         default:                                              return nil
         }
     }

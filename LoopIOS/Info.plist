@@ -37,6 +37,8 @@
 	<string>$(KIMI_API_KEY)</string>
 	<key>CURSOR_API_KEY</key>
 	<string>$(CURSOR_API_KEY)</string>
+	<key>HIGGSFIELD_API_KEY</key>
+	<string>$(HIGGSFIELD_API_KEY)</string>
 	<key>OBSIDIAN_API_KEY</key>
 	<string>$(OBSIDIAN_API_KEY)</string>
 	<key>OBSIDIAN_BASE_URL</key>

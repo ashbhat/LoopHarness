@@ -1070,6 +1070,7 @@ extension MessagingVC: MessageBoxDelegate {
         #if canImport(HealthKit) && os(iOS)
         if let s = HealthSkill.shared.statusText(for: call) { return s }
         #endif
+        if let s = HiggsFieldSkill.shared.statusText(for: call) { return s }
         if let s = DynamicSkillRegistry.shared.statusText(for: call) { return s }
 
         switch call.name {
