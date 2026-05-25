@@ -45,7 +45,7 @@ final class IntegrationSkill {
 
     static let systemPromptFragment: String = """
 You can manage the user's integrations and API keys directly:
-- list_integrations: enumerate the integrations Loop knows about (Google Calendar via EventKit, Notion, Gmail, Slack) and their current connection state. Slack is token-backed (personal xoxp- user token stored as a Keychain API key) — status flips to "connected" once the user pastes it.
+- list_integrations: enumerate the integrations Loop knows about (Google Calendar via EventKit, Notion, Gmail, Slack) and their current connection state. Notion and Slack are token-backed (ntn_… integration token and xoxp- user token respectively, both stored in the Keychain) — status flips to "connected" once the user pastes the relevant key.
 - connect_integration: kick off the connect flow for a named integration. For Google Calendar this triggers the OS permission prompt when status is undetermined; if access was previously denied, the tool returns a hint telling you to call open_integration_settings with target="calendar_privacy". For Slack, this returns a `needs_api_key` payload with instructions to walk the user through minting an xoxp- token and pasting it in Settings → Keys → Slack User Token.
 - open_integration_settings: surfaces the in-app Integrations panel (target="in_app", default) or the system Privacy pane (target="calendar_privacy"). Use this when the user says "open integrations" / "let me see my settings".
 - list_api_keys: reports which API keys are currently set (Deepgram, ElevenLabs, OpenAI, Exa, Cursor, Obsidian). Values are never returned — only whether each is present.
@@ -228,11 +228,14 @@ Tips:
             "status": calendarStatusString(calStatus),
             "hint": calendarHint(calStatus)
         ]
+        let notionToken = KeyStore.shared.value(for: .notionIntegrationToken) ?? ""
         let notion: [String: Any] = [
             "name": "notion",
             "display_name": "Notion",
-            "status": "always_on",
-            "hint": "Routed through Loop's backend — no user action needed."
+            "status": notionToken.isEmpty ? "not_connected" : "connected",
+            "hint": notionToken.isEmpty
+                ? "Paste an ntn_… integration token in Settings → Keys → Notion Integration Token."
+                : "Connected via Notion integration token. Notion tools are live."
         ]
         let gmail: [String: Any] = [
             "name": "gmail",
@@ -311,11 +314,20 @@ Tips:
             }
 
         case "notion":
-            completion(Self.functionMessage(name: toolName, payload: [
-                "name": "notion",
-                "status": "always_on",
-                "message": "Notion is routed through Loop's backend and is always available — no per-user setup needed."
-            ]))
+            let token = KeyStore.shared.value(for: .notionIntegrationToken) ?? ""
+            if !token.isEmpty {
+                completion(Self.functionMessage(name: toolName, payload: [
+                    "name": "notion",
+                    "status": "already_connected",
+                    "message": "Notion is already connected via an integration token. Notion tools are live."
+                ]))
+            } else {
+                completion(Self.functionMessage(name: toolName, payload: [
+                    "name": "notion",
+                    "status": "needs_api_key",
+                    "next_action": "Tell the user to paste their Notion integration token (starts with ntn_) in Settings → Keys → Notion Integration Token. They can create one at notion.so/my-integrations → New integration → copy the Internal Integration Secret."
+                ]))
+            }
 
         case "gmail":
             completion(Self.functionMessage(name: toolName, payload: [

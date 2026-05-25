@@ -325,8 +325,18 @@ final class RecorderWindowController: NSWindowController, NSTextFieldDelegate, N
         attachmentChipLabel.stringValue = attachment.fileName
 
         // Placeholder icon while the real thumbnail loads. Mirrors the iOS
-        // chip's "generic glyph then real preview" sequence.
-        let symbolName = attachment.kind == .pdf ? "doc.richtext" : "photo"
+        // chip's "generic glyph then real preview" sequence. Image is the
+        // only kind that gets swapped for a real bitmap below — every other
+        // kind keeps its SF Symbol since the underlying file isn't visually
+        // meaningful at chip size.
+        let symbolName: String
+        switch attachment.kind {
+        case .pdf:      symbolName = "doc.richtext"
+        case .image:    symbolName = "photo"
+        case .markdown: symbolName = "doc.text"
+        case .text:     symbolName = "chevron.left.forwardslash.chevron.right"
+        case .generic:  symbolName = "doc"
+        }
         attachmentChipImage.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
 
         if attachment.kind == .image {
@@ -469,7 +479,6 @@ final class RecorderWindowController: NSWindowController, NSTextFieldDelegate, N
     ///  - During a voice turn (recording/transcribing/thinking/speaking) we
     ///    suppress the click-away dismissal entirely — the user is allowed
     ///    to click anywhere without losing the bar.
-    private var clickAwayMonitorLocal: Any?
     private var clickAwayMonitorGlobal: Any?
 
     private func wireVisibilityObservers() {
@@ -566,24 +575,16 @@ final class RecorderWindowController: NSWindowController, NSTextFieldDelegate, N
             self?.handleClickAway(at: NSEvent.mouseLocation)
         }
 
-        // Local monitor: clicks while Loop is frontmost (so clicking on the
-        // conversation window also dismisses the bar). Returning the event
-        // unchanged lets the click reach the original target.
-        clickAwayMonitorLocal = NSEvent.addLocalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] event in
-            // Local events have a window — if it's our recorder panel, ignore.
-            if event.window === self?.window {
-                return event
-            }
-            self?.handleClickAway(at: NSEvent.mouseLocation)
-            return event
-        }
+        // No local monitor: local mouse-down events fire only when Loop is
+        // frontmost, which means the click landed on one of Loop's own
+        // windows (recorder bar, conversation window, settings, etc.).
+        // Any of those means the user is actively using Loop — keep the
+        // bar visible. The global monitor above handles dismissal when
+        // the user clicks into another app.
     }
 
     private func removeClickAwayMonitor() {
         if let m = clickAwayMonitorGlobal { NSEvent.removeMonitor(m); clickAwayMonitorGlobal = nil }
-        if let m = clickAwayMonitorLocal { NSEvent.removeMonitor(m); clickAwayMonitorLocal = nil }
     }
 
     private func handleClickAway(at screenPoint: NSPoint) {
@@ -671,6 +672,28 @@ final class RecorderWindowController: NSWindowController, NSTextFieldDelegate, N
     }
 
     // MARK: - Send via type
+
+    /// Prefill the recorder's text field with a suggestion (used by the
+    /// onboarding coordinator to one-tap the user's name, etc.). Caret goes
+    /// to end so the user can either send-as-is or edit before sending. Also
+    /// updates the send button + bar height as if the user had typed.
+    func prefillInputText(_ text: String) {
+        textField.stringValue = text
+        adjustWindowHeightToFitText()
+        updateSendButtonAppearance()
+        // Bring the panel forward and focus the field so a single press of
+        // Return submits.
+        window?.makeKeyAndOrderFront(nil)
+        window?.makeFirstResponder(textField)
+    }
+
+    /// Bring the recorder bar forward and put the cursor in its text field
+    /// without changing the current text. Used by the onboarding coordinator
+    /// after the greeting so the user can type their name immediately.
+    func focusInputField() {
+        window?.makeKeyAndOrderFront(nil)
+        window?.makeFirstResponder(textField)
+    }
 
     @objc private func sendTapped() {
         let text = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -803,10 +826,13 @@ final class RecorderWindowController: NSWindowController, NSTextFieldDelegate, N
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
+        // Accept any file — AttachmentStore kinds it on save and enforces
+        // the 20 MB ceiling. Restricting to specific UTIs here would block
+        // markdown / source / text drops the new card paths handle fine.
         if #available(macOS 11.0, *) {
-            panel.allowedContentTypes = [.image, .pdf]
+            panel.allowedContentTypes = [.item]
         } else {
-            panel.allowedFileTypes = ["jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tiff", "tif", "pdf"]
+            panel.allowedFileTypes = nil
         }
         panel.prompt = "Attach"
         // Anchor to the recorder window so the panel feels attached to the
@@ -988,14 +1014,61 @@ final class RecorderFieldEditor: NSTextView {
         return super.performDragOperation(sender)
     }
 
+    /// Cmd+V routing. If the clipboard holds an image file URL (Finder copy)
+    /// or raw image bytes (screenshot, "Copy Image" from Safari/Preview), stage
+    /// it as an attachment via the same `onFileDropped` path the drag handler
+    /// uses — writing pasteboard image data to a temp file first so the rest
+    /// of the pipeline can stay file-URL based. Falls through to the normal
+    /// text paste when there's no image content.
+    override func paste(_ sender: Any?) {
+        let pb = NSPasteboard.general
+        if let url = firstAcceptableFileURL(on: pb) {
+            onFileDropped?(url)
+            return
+        }
+        if let url = writePastedImageToTempFile(on: pb) {
+            onFileDropped?(url)
+            return
+        }
+        super.paste(sender)
+    }
+
     private func firstAcceptableFileURL(in info: NSDraggingInfo) -> URL? {
+        return firstAcceptableFileURL(on: info.draggingPasteboard)
+    }
+
+    private func firstAcceptableFileURL(on pb: NSPasteboard) -> URL? {
         let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-        guard let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL],
+        guard let urls = pb.readObjects(forClasses: [NSURL.self], options: options) as? [URL],
               let url = urls.first else { return nil }
         let ext = url.pathExtension.lowercased()
         if ext == "pdf" { return url }
         if Self.imageExts.contains(ext) { return url }
         return nil
+    }
+
+    /// Pull image bytes off the pasteboard (PNG preferred, TIFF converted) and
+    /// write them to a fresh temp file. Returns nil when there's no image
+    /// content — the caller should then fall back to plain-text paste.
+    private func writePastedImageToTempFile(on pb: NSPasteboard) -> URL? {
+        let pngData: Data?
+        if let png = pb.data(forType: .png) {
+            pngData = png
+        } else if let tiff = pb.data(forType: .tiff),
+                  let bitmap = NSBitmapImageRep(data: tiff) {
+            pngData = bitmap.representation(using: .png, properties: [:])
+        } else {
+            pngData = nil
+        }
+        guard let data = pngData else { return nil }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pasted-\(UUID().uuidString).png")
+        do {
+            try data.write(to: url)
+            return url
+        } catch {
+            return nil
+        }
     }
 }
 

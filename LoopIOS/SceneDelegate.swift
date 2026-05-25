@@ -11,24 +11,32 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     var window: UIWindow?
 
-    /// Holds the live onboarding modal while the first-run flow is on screen.
-    /// Cleared once the user completes step 3. We hang on to it from this side
-    /// so the Action Button intent path (handleMicURL) can ask it whether to
-    /// consume the press as the "first message" trigger.
-    private var onboardingVC: OnboardingViewController?
-
-
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         // Use this method to optionally configure and attach the UIWindow `window` to the provided UIWindowScene `scene`.
         // If using a storyboard, the `window` property will automatically be initialized and attached to the scene.
         // This delegate does not imply the connecting scene or session are new (see `application:configurationForConnectingSceneSession` instead).
         guard let _ = (scene as? UIWindowScene) else { return }
 
-        // Defer onboarding until after the storyboard has finished hooking
-        // up the root view controller; presenting from willConnectTo races
-        // the storyboard load.
-        DispatchQueue.main.async { [weak self] in
-            self?.presentOnboardingIfNeeded()
+        // Onboarding used to be a separate fullscreen modal presented from
+        // here on first launch. It now happens inside MessagingVC's chat
+        // (driven by OnboardingCoordinator), so this scene hook has no
+        // onboarding work to do — MessagingVC.viewDidLoad asks the
+        // coordinator to resume on its own.
+
+        // Cold-start URL handoff. When iOS launches Loop in response to a
+        // `commandintel://share?file=…` open() call from the share extension,
+        // the URL is delivered here in `connectionOptions.urlContexts` —
+        // `scene(_:openURLContexts:)` is NOT separately invoked for the
+        // launch URL. Without this hop a cold-start share would have to wait
+        // for the `sceneDidBecomeActive` inbox-drain fallback, which races
+        // with MessagingVC.viewDidLoad. Forward to the same handler the warm
+        // path uses; the queue-backed SharedAttachmentInbox absorbs the rare
+        // case where it overlaps with the sceneDidBecomeActive drain.
+        if !connectionOptions.urlContexts.isEmpty {
+            let contexts = connectionOptions.urlContexts
+            DispatchQueue.main.async { [weak self] in
+                self?.scene(scene, openURLContexts: contexts)
+            }
         }
     }
 
@@ -160,7 +168,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let messagingVC = findMessagingVC() else {
             // Cold start path — MessagingVC.viewDidLoad checks
             // SharedAttachmentInbox on launch and consumes whatever's there.
-            SharedAttachmentInbox.shared.pending = attachment
+            SharedAttachmentInbox.shared.enqueue(attachment)
             return
         }
         messagingVC.stageIncomingAttachment(attachment)
@@ -193,7 +201,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let messagingVC = findMessagingVC() else {
             // Cold start: stash on a one-shot pending box that
             // MessagingVC.viewDidLoad consumes once it's wired up.
-            SharedAttachmentInbox.shared.pending = attachment
+            SharedAttachmentInbox.shared.enqueue(attachment)
             return
         }
         messagingVC.stageIncomingAttachment(attachment)
@@ -218,12 +226,14 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func handleMicURL() {
         print("Handling intel://mic URL")
 
-        // Onboarding step 3 ("press the Action Button") consumes the first
-        // hardware press as its completion signal. The view dismisses itself
-        // and we fall through so the press also kicks off voice capture on
-        // MessagingVC — the user sees the live recorder UI the moment the
-        // onboarding modal cross-dissolves away.
-        onboardingVC?.handleActionButtonPressed()
+        // Mid-onboarding the press doubles as proof the user bound the
+        // Action Button. The coordinator marks the step complete and lets
+        // us fall through so the same press also starts voice capture —
+        // the binding press is the user's first real voice message.
+        // Outside onboarding, this is a no-op besides flipping
+        // `OnboardingState.actionButtonBound = true`, which hides the
+        // "set up later" reminder banner in MainVC.
+        OnboardingCoordinator.shared.handleActionButtonPressed()
 
         // Get the root view controller
         guard let windowScene = window?.windowScene,
@@ -251,30 +261,6 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // Store the intent to trigger voice transcription after view loads
         NotificationCenter.default.post(name: NSNotification.Name("TriggerVoiceTranscription"), object: nil)
     }
-
-    // MARK: - Onboarding
-
-    /// Presents the iOS onboarding modal on first launch. No-op once the user
-    /// has completed (or already-dismissed) the flow. Called from
-    /// scene(_:willConnectTo:) after a runloop hop so the storyboard's initial
-    /// view controller is on screen first — the onboarding is layered on top
-    /// of it rather than replacing it.
-    private func presentOnboardingIfNeeded() {
-        guard !OnboardingState.isComplete else { return }
-        guard let root = window?.rootViewController else { return }
-        // Walk to the topmost presented controller so we don't try to present
-        // on a view controller that's already presenting something.
-        var top = root
-        while let presented = top.presentedViewController { top = presented }
-
-        let vc = OnboardingViewController()
-        vc.onCompleted = { [weak self] in
-            self?.onboardingVC = nil
-        }
-        self.onboardingVC = vc
-        top.present(vc, animated: true)
-    }
-
 
 }
 

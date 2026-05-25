@@ -54,8 +54,41 @@ enum SharedInbox {
     /// Resolves a previously-returned filename back to its full URL. Used by
     /// the main app's URL handler so callers don't have to know about the
     /// App Group path layout.
+    ///
+    /// Strictly validates the filename: it must match the `<uuid>.<ext>` shape
+    /// `writeImage` produces. Without this gate, the `commandintel://share?file=`
+    /// URL scheme would let any installed app pass `..`/`/` segments and reach
+    /// arbitrary files Loop can read (notably the iCloud workspace at the
+    /// deterministic `iCloud~com~bhat~intel/Documents/` path) — they'd be
+    /// copied into `workspace/attachments/`, deleted at their original
+    /// location via `remove(_:)`, and queued for the next outgoing chat turn.
+    /// `URL.appendingPathComponent` doesn't percent-encode `/` so the
+    /// traversal would otherwise resolve normally. After resolving, we also
+    /// assert the path stays inside `inboxDirectory()` as belt-and-suspenders
+    /// against future encoding quirks.
     static func urlForFilename(_ filename: String) -> URL? {
-        return inboxDirectory()?.appendingPathComponent(filename)
+        guard isValidInboxFilename(filename),
+              let dir = inboxDirectory() else { return nil }
+        let candidate = dir.appendingPathComponent(filename).standardizedFileURL
+        let dirPath = dir.standardizedFileURL.path
+        guard candidate.path.hasPrefix(dirPath + "/") else { return nil }
+        return candidate
+    }
+
+    /// Allowlist for filenames the share-extension hand-off can name. Matches
+    /// `<UUID>.<1-8 alnum>` — the exact shape `writeImage` emits. Anything
+    /// else (path separators, `..` segments, empty, oversize extension) is
+    /// rejected before it can reach a file-read or file-delete site.
+    private static let inboxFilenamePattern: NSRegularExpression = {
+        // swiftlint:disable:next force_try
+        return try! NSRegularExpression(
+            pattern: #"^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}\.[A-Za-z0-9]{1,8}$"#
+        )
+    }()
+
+    static func isValidInboxFilename(_ filename: String) -> Bool {
+        let range = NSRange(filename.startIndex..., in: filename)
+        return Self.inboxFilenamePattern.firstMatch(in: filename, range: range) != nil
     }
 
     /// Every file currently sitting in the inbox, sorted oldest-first.
@@ -89,7 +122,17 @@ enum SharedInbox {
 
     /// Remove a single file by URL. Used by the URL-handoff path which
     /// processes one specific filename rather than draining the whole inbox.
+    ///
+    /// Re-validates that `url` actually lives inside the inbox before
+    /// deleting. `urlForFilename` already gates resolution, but `remove` is
+    /// reachable from any caller that holds a URL — independently guarding
+    /// here means a future code path that resolves a URL differently can't
+    /// accidentally hand us an arbitrary file to delete.
     static func remove(_ url: URL) {
+        guard let dir = inboxDirectory() else { return }
+        let dirPath = dir.standardizedFileURL.path
+        let target = url.standardizedFileURL.path
+        guard target.hasPrefix(dirPath + "/") else { return }
         try? FileManager.default.removeItem(at: url)
     }
 }

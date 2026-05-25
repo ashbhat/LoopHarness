@@ -50,6 +50,11 @@ final class SettingsVC: UIViewController {
         Section(header: "Help", rows: [
             Row(title: "Replay onboarding", icon: "arrow.counterclockwise") { settings in
                 settings.confirmReplayOnboarding()
+            },
+            Row(title: "View Source Code", icon: "curlybraces") { _ in
+                if let url = URL(string: "https://github.com/theashbhat/LoopHarness") {
+                    UIApplication.shared.open(url)
+                }
             }
         ]),
     ]
@@ -99,21 +104,22 @@ final class SettingsVC: UIViewController {
         present(alert, animated: true)
     }
 
-    /// Resets the onboarding flags and presents the modal on top of Settings.
-    /// We don't bounce through SceneDelegate.presentOnboardingIfNeeded because
-    /// that only runs on scene connect — driving the present from here means
-    /// the user gets immediate feedback without a relaunch.
+    /// Resets the onboarding flags and dismisses Settings. The conversational
+    /// onboarding now lives inside MessagingVC; calling `resetForReplay()`
+    /// on the coordinator lets `resumeIfNeeded()` re-fire in the existing
+    /// MessagingVC instance — the user lands back on the chat with the
+    /// greeting card already posted.
     private func replayOnboarding() {
         OnboardingState.isComplete = false
         OnboardingState.lastStep = 0
+        OnboardingState.actionButtonSkipped = false
+        OnboardingState.actionButtonReminderDismissedAt = nil
 
-        let vc = OnboardingViewController()
-        // Dismiss Settings on completion so the user lands back on the
-        // conversation pane, matching what they'd see on a real first run.
-        vc.onCompleted = { [weak self] in
-            self?.dismiss(animated: true)
+        OnboardingCoordinator.shared.resetForReplay()
+
+        dismiss(animated: true) {
+            OnboardingCoordinator.shared.resumeIfNeeded()
         }
-        present(vc, animated: true)
     }
 }
 
@@ -137,7 +143,7 @@ extension SettingsVC: UITableViewDataSource, UITableViewDelegate {
         config.text = row.title
         config.image = UIImage(systemName: row.icon)
         cell.contentConfiguration = config
-        cell.accessoryType = .disclosureIndicator
+        cell.accessoryType = row.title == "View Source Code" ? .none : .disclosureIndicator
         return cell
     }
 

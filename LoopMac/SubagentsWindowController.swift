@@ -37,13 +37,25 @@ final class SubagentsWindowController: NSWindowController {
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
+
+    /// Show the window and pre-select a specific Devin session in the sidebar.
+    /// Used by the chat inspector to push the user from the pill popup straight
+    /// into the live transcript for the session they tapped — equivalent to
+    /// iPhone's push to `DevinAgentDetailVC`.
+    func show(sessionId: String) {
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        (window?.contentViewController as? SubagentsViewController)?
+            .select(sessionId: sessionId)
+    }
 }
 
 // MARK: - List + detail
 
-fileprivate final class SubagentsViewController: NSViewController,
-                                                  NSTableViewDataSource,
-                                                  NSTableViewDelegate {
+final class SubagentsViewController: NSViewController,
+                                     NSTableViewDataSource,
+                                     NSTableViewDelegate {
 
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
@@ -162,6 +174,14 @@ fileprivate final class SubagentsViewController: NSViewController,
             name: .devinAgentsDidChange,
             object: nil
         )
+    }
+
+    /// Pre-select a session by id so callers (the chat inspector pill) can push
+    /// the user directly into a specific transcript instead of landing on the
+    /// most-recent row. Used by `SubagentsWindowController.show(sessionId:)`.
+    func select(sessionId: String) {
+        lastSelectedSessionId = sessionId
+        refresh()
     }
 
     override func viewWillAppear() {

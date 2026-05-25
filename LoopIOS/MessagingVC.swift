@@ -8,6 +8,7 @@
 import UIKit
 import AVFoundation
 import FoundationModels
+import QuickLook
 
 
 enum AIState: Equatable {
@@ -138,6 +139,11 @@ class MessagingVC: UIViewController {
     /// presents `SubAgentInspectorVC`. Collapses to zero height when no
     /// sub-agents are alive so it doesn't eat layout space.
     let subAgentStatusBar = SubAgentStatusBarView()
+
+    /// Persistent reminder shown after the user skipped the Action Button
+    /// step during onboarding. Same collapse-to-zero behavior as the
+    /// sub-agent pill, stacked just below it.
+    let actionButtonReminderBar = ActionButtonReminderBarView()
 
     var bottomConstraint: NSLayoutConstraint?
     
@@ -302,7 +308,9 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
     
     
     // Mute state — synced across reinstalls/devices via iCloudKVSDefaults.
-    private var isMuted: Bool {
+    // Internal (not private) so the expanded AgentView's speaker button can
+    // mirror the nav-bar toggle via the AgentLargeViewVoiceDelegate path.
+    var isMuted: Bool {
         get {
             return iCloudKVSDefaults.shared.bool(forKey: "audioMuted")
         }
@@ -321,11 +329,24 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
     var visible_messages: [MessageStruct] {
         return self.messages.filter({
             // System + bare function calls + raw function results are hidden,
-            // EXCEPT we keep messages carrying an imageAttachment regardless
-            // of role — those are the inline image bubbles.
+            // EXCEPT we keep messages carrying an image, map, or file
+            // attachment regardless of role — those are inline bubbles whose
+            // only surface is the rendered visual. share_file produces a
+            // function-role message with a fileAttachment; image / map
+            // skills do the same.
             if $0.imageAttachment != nil { return true }
+            if $0.mapAttachment != nil { return true }
+            if $0.fileAttachment != nil { return true }
             return $0.role != "system" && $0.function == nil && $0.role != "function"
         })
+    }
+
+    /// Messages eligible for the LLM call. Same set as `self.messages` minus
+    /// any onboarding-flow turns — those are scripted UI, not part of the
+    /// real conversation, and should not leak into the model's context on the
+    /// first real message the user sends.
+    var chatContextMessages: [MessageStruct] {
+        return self.messages.filter { $0.onboardingCard == nil }
     }
     
     override func viewDidLoad() {
@@ -338,6 +359,9 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
         // into the chat as the long-running HTTP request progresses; route
         // those through us so the bubble updates in place.
         ImageGenerationService.shared.host = self
+        // Same plumbing for PDFGenerationService — placeholder card on
+        // submit, swap to ready/failed when the WKWebView render finishes.
+        PDFGenerationService.shared.host = self
         // CalendarSkill needs a UI host so it can present
         // EKEventEditViewController for the user to review proposed events
         // before they're saved.
@@ -351,6 +375,7 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
         // Sweep stale .generating attachments forward to .failed so a kill
         // mid-generation doesn't leave us with a forever-spinning bubble.
         cleanupStuckImageGenerations()
+        cleanupStuckPDFGenerations()
 
         let currentDate = Date()
         let dateFormatter = DateFormatter()
@@ -367,6 +392,17 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
         
         // Load last conversation and messages
         loadLastConversation()
+
+        // Hook the conversational onboarding flow. The coordinator no-ops
+        // when `OnboardingState.isComplete` is true, so existing users see
+        // nothing change. On a fresh install (or mid-flow resume) it posts
+        // the next scripted assistant prompt + card into this chat.
+        OnboardingCoordinator.shared.host = self
+        DispatchQueue.main.async {
+            // Run after viewDidLoad finishes so the table view is laid out
+            // before the first onboarding message goes in.
+            OnboardingCoordinator.shared.resumeIfNeeded()
+        }
         
         self.messageIdToAnimate = self.visible_messages.last(where: {$0.role == "assistant"})?.id
         
@@ -388,6 +424,16 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
             self,
             selector: #selector(handleIntegrationSettingsRequest(_:)),
             name: .integrationSkillRequestedSettings,
+            object: nil
+        )
+
+        // NavigationSkill posts this when the model calls open_panel — same
+        // skill-stays-platform-agnostic pattern. The handler picks the right
+        // presentation (side drawer, settings modal, agent immersive view).
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleNavigationOpenPanel(_:)),
+            name: .navigationSkillOpenPanel,
             object: nil
         )
 
@@ -416,14 +462,42 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
             object: nil
         )
 
-        // Pick up any attachment the SceneDelegate stashed during cold-start
-        // before MessagingVC had loaded. This drains the inbox so the file
-        // doesn't reappear on later view loads.
-        if let pending = SharedAttachmentInbox.shared.drain() {
+        // Pick up any attachments the SceneDelegate stashed during cold-start
+        // before MessagingVC had loaded. Each call to `stageIncomingAttachment`
+        // overwrites the chip, so the last one wins as the visible staging —
+        // the prior shares stay in the message-box state stream by virtue of
+        // being processed in order, which is fine for the typical one-image
+        // flow. The queue is drained so files don't reappear on view reload.
+        for pending in SharedAttachmentInbox.shared.drainAll() {
             self.stageIncomingAttachment(pending)
         }
 
+        // Cover the cold-start race where the App Group has files waiting but
+        // neither the launch URL nor `sceneDidBecomeActive` managed to stage
+        // them onto a MessagingVC instance yet (e.g., scene wasn't fully
+        // active when the URL arrived). Sweep the App Group inbox directly
+        // so the share lands on the chip regardless of which hook fired first.
+        drainAppGroupInbox()
+
         // Do any additional setup after loading the view.
+    }
+
+    /// Sweep the App Group `SharedInbox` for files the share extension wrote
+    /// and stage each one. Mirrors `SceneDelegate.drainSharedInbox` but runs
+    /// from inside MessagingVC so the cold-start path doesn't depend on the
+    /// scene delegate's hook firing in the right order. Same on-success delete
+    /// behavior so the file isn't re-staged on a later view reload.
+    private func drainAppGroupInbox() {
+        SharedInbox.drain { url in
+            do {
+                let attachment = try AttachmentStore.shared.saveFromFileURL(url)
+                self.stageIncomingAttachment(attachment)
+                return true
+            } catch {
+                print("MessagingVC inbox drain failed for \(url.lastPathComponent): \(error.localizedDescription)")
+                return false
+            }
+        }
     }
 
     /// Public entry point used by the SceneDelegate when a file is shared
@@ -462,6 +536,10 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
 
     override func viewWillAppear(_ animated: Bool) {
         self.navigationController?.setNavigationBarHidden(false, animated: false)
+        // Re-check whether the Action Button reminder pill should be showing
+        // (user may have come back from Settings, snoozed earlier, or now
+        // qualifies for the 7-day re-show window).
+        actionButtonReminderBar.refresh()
     }
     
     deinit {
@@ -502,14 +580,14 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
         }
         
         print("🔄 Total messages after loading: \(messages.count)")
-        
+
         // Reload table view and scroll to bottom
         DispatchQueue.main.async {
             self.tableView.reloadData()
             self.scrollToLastMessage()
         }
     }
-    
+
     private func loadDefaultMessage() {
         // Clear existing messages except system message
         messages = [messages[0]] // Keep system message
@@ -536,6 +614,19 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
     }
 
     private func createNewConversation() {
+        // No-op when the *persisted* current chat has no user/assistant
+        // turns. Reading from the store (not in-memory `self.messages`,
+        // which a previous createNewConversation already reset to just the
+        // system row) is what makes this reliable across rapid taps. If the
+        // user is sitting on a fresh blank chat, they'd just land on
+        // another identical blank one — reuse the existing one instead.
+        if currentConversationIsEmpty() {
+            return
+        }
+        // Stop any in-flight TTS from the chat we're leaving — finishing the
+        // previous message out loud while the user has already moved on
+        // feels stale.
+        stopSpeaking()
         // Create a new conversation with a unique title
         let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short)
         let newConversation = conversationManager.createConversation(title: "New Chat \(timestamp)")
@@ -544,6 +635,27 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
         ttsStatuses.removeAll()
         ttsStartTimes.removeAll()
         loadDefaultMessage()
+    }
+
+    /// True when the *persisted* current conversation has no user-or-
+    /// assistant turns. Reads from the store rather than `self.messages`
+    /// because the in-memory array can be mid-reset (e.g., during a tap
+    /// that just landed on `loadDefaultMessage`) and would mis-report as
+    /// empty even though the on-screen conversation is full.
+    private func currentConversationIsEmpty() -> Bool {
+        let target = currentConversationEntity
+            ?? conversationManager.currentConversation
+        guard let conv = target else {
+            // No conversation at all yet — first tap on a freshly-installed
+            // app. Treat as empty so we don't spin up two blank ones.
+            return true
+        }
+        return !conv.messages.contains { msg in
+            (msg.role == "user" || msg.role == "assistant")
+                && !msg.id.hasPrefix("image-")
+                && !msg.id.hasPrefix("pdf-")
+                && !msg.content.isEmpty
+        }
     }
     
     func ensureCurrentConversation() -> SimpleConversation {
@@ -596,7 +708,87 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
             }
         }
     }
-    
+
+    /// NavigationSkill posts this when the model calls `open_panel`. The
+    /// `panel` key carries the canonical panel id; `tab` (if present) picks
+    /// the initial tab for side-drawer surfaces.
+    @objc private func handleNavigationOpenPanel(_ note: Notification) {
+        let panel = (note.userInfo?["panel"] as? String) ?? ""
+        let tab = note.userInfo?["tab"] as? String
+        DispatchQueue.main.async { [weak self] in
+            self?.openPanel(named: panel, tab: tab)
+        }
+    }
+
+    /// Resolve a NavigationSkill panel id to the right presentation. Drawer
+    /// panels just call `showSideDrawer(initialTab:)`; settings sub-panels
+    /// present the SettingsVC modal with the requested VC pre-pushed; the
+    /// immersive agent view goes through MainVC's pop animator.
+    private func openPanel(named panel: String, tab: String?) {
+        switch panel {
+        case "files":
+            showSideDrawer(initialTab: tab ?? "files")
+        case "skills":
+            showSideDrawer(initialTab: tab ?? "skills")
+        case "conversations":
+            showSideDrawer(initialTab: tab ?? "conversations")
+        case "settings":
+            presentSettingsStack(pushing: nil)
+        case "integrations":
+            presentSettingsStack(pushing: IntegrationsVC())
+        case "keys":
+            presentSettingsStack(pushing: KeysVC())
+        case "subagents":
+            presentSettingsStack(pushing: SubagentsListVC())
+        case "scheduled":
+            presentSettingsStack(pushing: ScheduledTasksVC())
+        case "model":
+            presentSettingsStack(pushing: ModelPickerVC())
+        case "agent":
+            // iOS-only immersive surface — lives on MainVC, so cast and call.
+            // If the avatar isn't ready yet (rare cold-start race), no-op
+            // rather than crashing.
+            (self as? MainVC)?.presentAgentLargeView()
+        case "microphone":
+            // No dedicated iOS panel — fall through to Settings root rather
+            // than silently dropping the request.
+            presentSettingsStack(pushing: nil)
+        default:
+            // Unknown id reaches us only if a new platform-only panel was
+            // added; ignore quietly.
+            break
+        }
+    }
+
+    /// Present (or reuse) the Settings modal and optionally push a sub-page
+    /// onto its nav stack. If Settings is already visible we just push or pop
+    /// to the requested screen instead of re-presenting.
+    private func presentSettingsStack(pushing sub: UIViewController?) {
+        // Already presented? Reach into its nav controller.
+        if let presentedNav = presentedViewController as? UINavigationController,
+           presentedNav.viewControllers.first is SettingsVC {
+            if let sub = sub {
+                // Pop back to root then push the new sub-page so we don't
+                // stack duplicates if the user invokes the same panel twice.
+                presentedNav.popToRootViewController(animated: false)
+                presentedNav.pushViewController(sub, animated: true)
+            } else {
+                presentedNav.popToRootViewController(animated: true)
+            }
+            return
+        }
+
+        let settings = SettingsVC()
+        let nav = UINavigationController(rootViewController: settings)
+        nav.modalPresentationStyle = .formSheet
+        if let sub = sub {
+            // Push without animation while presenting so the user lands on
+            // the sub-page directly instead of seeing the root flash.
+            nav.pushViewController(sub, animated: false)
+        }
+        present(nav, animated: true)
+    }
+
     func toggleVoiceTranscription() {
         print("Toggling voice transcription")
         
@@ -611,10 +803,50 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
     }
     
     func newMessageSent() {
-        
+
     }
-    
-    
+
+
+}
+
+extension MessagingVC: AgentLargeViewVoiceDelegate {
+    /// Begin recording when the expanded AgentView's press-and-hold pill is
+    /// touched. Reuses the same MessageBox path the in-chat mic button takes,
+    /// so transcription, partial-results, and TTS-yield behavior are
+    /// identical whether the user composes from chat or from the orb.
+    func agentLargeViewDidBeginVoice() {
+        // Defensive: if a prior recording is somehow still in flight (rapid
+        // gesture re-fire, view re-entry mid-record), drop it before starting
+        // a fresh capture so we never have two active sessions.
+        if messageBox.currentState == .recording {
+            messageBox.stopVoiceRecording()
+        }
+        messageBox.startVoiceRecording()
+    }
+
+    /// Release — send the captured audio for transcription + dispatch.
+    func agentLargeViewDidEndVoice() {
+        messageBox.sendCurrentRecording()
+    }
+
+    /// Gesture interrupted — drop the buffer without sending. Matches the
+    /// expectation that a half-pressed pill (interrupted by a system dialog
+    /// or a sheet dismiss) never accidentally posts to the model.
+    func agentLargeViewDidCancelVoice() {
+        messageBox.stopVoiceRecording()
+    }
+
+    /// Mirror the nav-bar speaker button's state.
+    func agentLargeViewIsMuted() -> Bool { isMuted }
+
+    /// Flip the persisted mute state and stop any in-flight speech if the
+    /// user just muted. The `isMuted` setter already refreshes the nav-bar
+    /// icon via `updateMuteButtonAppearance`, so this keeps both surfaces
+    /// in sync from a single source of truth.
+    func agentLargeViewDidToggleMute() {
+        isMuted.toggle()
+        if isMuted { stopSpeaking() }
+    }
 }
 
 extension MessagingVC: MessageBoxDelegate {
@@ -641,7 +873,7 @@ extension MessagingVC: MessageBoxDelegate {
             self.tableView.reloadData()
         }
 
-        Cloud.connection.chat(messages: self.messages) { responseMessage, error in
+        Cloud.connection.chat(messages: self.chatContextMessages) { responseMessage, error in
             self.ai_state = .None
             if let responseMessage = responseMessage {
                 self.processMessage(message: responseMessage)
@@ -653,7 +885,7 @@ extension MessagingVC: MessageBoxDelegate {
                         print("Apple Intelligence enabled")
                         let session = LanguageModelSession()
 
-                        let singlePrompt = self.makeSinglePrompt(from: self.messages)
+                        let singlePrompt = self.makeSinglePrompt(from: self.chatContextMessages)
                         Task {
                             do {
                                 let response = try await session.respond(to: singlePrompt)
@@ -701,6 +933,14 @@ extension MessagingVC: MessageBoxDelegate {
     }
 
     func didSendMessageText(_ message: String) {
+        // Mid-onboarding text input goes to the coordinator first. If it
+        // consumes the message (echoes a bubble, advances the script, or
+        // re-posts the current step), short-circuit before the regular
+        // user-message + LLM-call path runs.
+        if OnboardingCoordinator.shared.handleUserText(message) {
+            return
+        }
+
         // Ensure we have a current conversation
         let conversation = ensureCurrentConversation()
 
@@ -740,7 +980,7 @@ extension MessagingVC: MessageBoxDelegate {
         })
 
 
-        Cloud.connection.chat(messages: self.messages) { responseMessage, error in
+        Cloud.connection.chat(messages: self.chatContextMessages) { responseMessage, error in
             self.ai_state = .None
             if let responseMessage = responseMessage {
                 self.processMessage(message: responseMessage)
@@ -753,7 +993,7 @@ extension MessagingVC: MessageBoxDelegate {
                         print("Apple Intelligence enabled")
                         let session = LanguageModelSession()
 
-                        let singlePrompt = self.makeSinglePrompt(from: self.messages)
+                        let singlePrompt = self.makeSinglePrompt(from: self.chatContextMessages)
                         Task {
                             do {
                                 print(singlePrompt)
@@ -824,6 +1064,7 @@ extension MessagingVC: MessageBoxDelegate {
         if let s = SubAgentSkill.shared.statusText(for: call) { return s }
         if let s = GitHubSkill.shared.statusText(for: call) { return s }
         if let s = DevinSkill.shared.statusText(for: call) { return s }
+        if let s = NavigationSkill.shared.statusText(for: call) { return s }
         if let s = DynamicSkillRegistry.shared.statusText(for: call) { return s }
 
         switch call.name {
@@ -862,6 +1103,12 @@ extension MessagingVC: MessageBoxDelegate {
             conversationManager.addMessage(message, to: conversation)
             currentConversationEntity = conversationManager.currentConversation
             self.messages.append(message)
+            // Publish the assistant turn to the activity log so the expanded
+            // AgentView can render it as a readable transcript below the orb.
+            // We publish here (not inside playMessageSynthesizer) because TTS
+            // is skippable — when the user has voice muted, the orb should
+            // still surface the text.
+            AgentActivityLog.shared.setAssistantTranscript(message.content)
             VoiceLoopCoordinator.shared.publishAcknowledgePulse()
             self.playMessageSynthesizer(message: message)
             self.messageIdToAnimate = message.id
@@ -871,18 +1118,27 @@ extension MessagingVC: MessageBoxDelegate {
                     self.scrollToLastMessage()
                 })
             }
+            // Fire-and-forget title generation. Safe to call on every
+            // assistant turn — the service dedupes per conversation id,
+            // skips chats that already have a real title, and waits for a
+            // real user-and-assistant exchange (onboarding turns don't
+            // count) before actually firing.
+            if let refreshed = conversationManager.getConversation(by: conversation.id) {
+                ConversationTitleService.shared.generateIfNeeded(
+                    for: refreshed,
+                    messages: self.messages
+                )
+            }
             return
         }
 
-        // Assistant emitted ≥1 tool call(s). Update the shimmer + activity log
-        // for the first call so the UI flips before any tool starts running,
-        // persist the assistant turn so the model can see its own call list
-        // on the next round-trip, then fan out every call before issuing one
-        // follow-up chat with all the results.
+        // Assistant emitted ≥1 tool call(s). Update the shimmer for the first
+        // call so the UI flips before any tool starts running, then hand off
+        // to dispatchAllCalls which logs each call individually as it begins
+        // (so the expanded AgentView caption tracks every parallel tool, not
+        // just the first one in the batch).
         if let firstCall = message.functions.first {
-            let status = self.statusText(for: firstCall)
-            self.ai_state = .Thinking(text: status)
-            AgentActivityLog.shared.log(.toolCall, status, detail: firstCall.name)
+            self.ai_state = .Thinking(text: self.statusText(for: firstCall))
         }
         self.messages.append(message)
         DispatchQueue.main.async { self.tableView.reloadData() }
@@ -912,6 +1168,17 @@ extension MessagingVC: MessageBoxDelegate {
         }
 
         for (index, call) in calls.enumerated() {
+            // Stamp a key for the activity log so the expanded AgentView can
+            // pair toolCall→toolResult and render a live "running N tools"
+            // caption while the batch is in flight. Provider-issued ids are
+            // preferred when present; otherwise we synthesize one purely for
+            // the log (the wire layer falls back to its own nil-handling).
+            let activityKey = call.callId ?? UUID().uuidString
+            AgentActivityLog.shared.beginToolCall(
+                callId: activityKey,
+                summary: self.statusText(for: call),
+                detail: call.name
+            )
             self.dispatchCall(call) { [weak self] result in
                 guard let self = self else { return }
                 var r = result
@@ -923,6 +1190,10 @@ extension MessagingVC: MessageBoxDelegate {
                 if r.callId == nil { r.callId = call.callId }
                 if r.name == nil   { r.name   = call.name }
                 DispatchQueue.main.async {
+                    AgentActivityLog.shared.endToolCall(
+                        callId: activityKey,
+                        resultSummary: "finished \(call.name)"
+                    )
                     resultBuffer[index] = r
                     pendingCount -= 1
                     if pendingCount == 0 {
@@ -950,7 +1221,7 @@ extension MessagingVC: MessageBoxDelegate {
         VoiceLoopCoordinator.shared.setState(.thinking)
         DispatchQueue.main.async { self.tableView.reloadData() }
 
-        Cloud.connection.chat(messages: self.messages) { [weak self] responseMessage, error in
+        Cloud.connection.chat(messages: self.chatContextMessages) { [weak self] responseMessage, error in
             guard let self = self else { return }
             self.ai_state = .None
             if let responseMessage = responseMessage {
@@ -1014,6 +1285,14 @@ extension MessagingVC: MessageBoxDelegate {
     private static let speechSanitizer = SpeechSanitizer()
     
     func playMessageSynthesizer(message: MessageStruct) {
+        // Onboarding messages are scripted UI, not assistant speech. Speaking
+        // them would be jarring (and TTS isn't even configured yet at this
+        // point in the flow). Drop the avatar back to idle and return early.
+        if message.onboardingCard != nil {
+            VoiceLoopCoordinator.shared.setState(.idle)
+            return
+        }
+
         // Check if audio is muted
         if isMuted {
             // No speech will play, but the assistant's turn IS complete —
@@ -1026,10 +1305,13 @@ extension MessagingVC: MessageBoxDelegate {
         // Stop any ongoing audio
         stopSpeaking()
 
-        // From the avatar's perspective the turn is now in its speaking
-        // phase. setState dedupes so the order with stopSpeaking (which also
-        // tries to drop to .idle) doesn't matter.
-        VoiceLoopCoordinator.shared.setState(.speaking)
+        // Stay in `.thinking` until the first audio sample actually plays —
+        // the green "speaking" avatar mode should be tightly paired with
+        // sound, not with our intent to speak. Each provider's first-audio
+        // hook (DeepgramTTS.onFirstAudio, playMP3Data after player.play(),
+        // speakOffline after AVSpeechSynthesizer.speak) flips state to
+        // `.speaking` at the right instant. Setting it here was wrong by
+        // 200–1500ms on Aura-2 / ElevenLabs / OpenAI depending on network.
 
         // Store the message ID we're speaking
         currentSpeechMessageId = message.id
@@ -1056,22 +1338,27 @@ extension MessagingVC: MessageBoxDelegate {
         }
 
         // Dispatch to the user-selected streaming TTS provider. Each begin*Speak
-        // returns true if it took ownership of this turn; false → fall through
-        // to AVSpeechSynthesizer.
+        // returns true if it took ownership of this turn; false means the
+        // provider couldn't start (missing/empty key, audio-session failure).
+        //
+        // Empty-string keys count as "not set" — KeyStore.value returns the
+        // raw keychain entry which can be "" if the user pasted whitespace
+        // or cleared the field — `!= nil` alone would let those through and
+        // we'd attempt a request with an empty Authorization header.
         let provider = self.ttsProvider
         let took: Bool
         switch provider {
         case .aura2:
-            took = MessagingVC.deepgramAPIKey != nil
+            took = Self.isKeyConfigured(MessagingVC.deepgramAPIKey)
                 && beginDeepgramSpeak(text: cleanContent, messageId: message.id)
         case .elevenLabsV3:
-            took = MessagingVC.elevenLabsAPIKey != nil
+            took = Self.isKeyConfigured(MessagingVC.elevenLabsAPIKey)
                 && beginElevenLabsSpeak(text: cleanContent, messageId: message.id, modelId: "eleven_v3")
         case .elevenLabsFlashV25:
-            took = MessagingVC.elevenLabsAPIKey != nil
+            took = Self.isKeyConfigured(MessagingVC.elevenLabsAPIKey)
                 && beginElevenLabsSpeak(text: cleanContent, messageId: message.id, modelId: "eleven_flash_v2_5")
         case .openAIMiniTTS:
-            took = MessagingVC.openAIAPIKey != nil
+            took = Self.isKeyConfigured(MessagingVC.openAIAPIKey)
                 && beginOpenAISpeak(text: cleanContent, messageId: message.id)
         case .system:
             // User explicitly chose offline TTS — skip any network providers.
@@ -1080,9 +1367,22 @@ extension MessagingVC: MessageBoxDelegate {
         }
         if took { return }
 
-        // No streaming provider configured (or all failed to start). Fall back
-        // to the on-device synthesizer.
-        speakOffline(text: cleanContent, messageId: message.id)
+        // The user picked a cloud voice but the key isn't configured
+        // (or starting the request failed locally). Stay silent rather
+        // than swapping in Apple's offline voice — "I picked OpenAI, why
+        // is Siri talking?" is a worse failure mode than silence. The
+        // Settings → Keys screen is where they'll fix this.
+        print("TTS: \(provider.displayName) couldn't start (key missing or local setup failed); staying silent")
+        VoiceLoopCoordinator.shared.setState(.idle)
+    }
+
+    /// True when `key` is non-nil and non-empty after trimming whitespace.
+    /// Keys that round-trip through pasted text can come back as empty
+    /// strings or whitespace-only, which would otherwise sneak past a
+    /// simple nil-check and produce a 401 from the provider.
+    private static func isKeyConfigured(_ key: String?) -> Bool {
+        guard let key = key else { return false }
+        return !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Compute the time-to-audio for `messageId` using the `ttsStartTimes`
@@ -1155,7 +1455,17 @@ extension MessagingVC: MessageBoxDelegate {
     /// Speak `text` using on-device AVSpeechSynthesizer. No network, no Deepgram.
     /// Picks the most lifelike voice available on the device (see
     /// `preferredOfflineVoice`).
+    ///
+    /// Re-checks the mute toggle even though `playMessageSynthesizer`
+    /// already does — the mid-stream fallback paths
+    /// (DeepgramTTS/ElevenLabs/OpenAI onError handlers) call this directly
+    /// after a network failure, and the mute state can flip between the
+    /// turn starting and the cloud provider giving up.
     private func speakOffline(text: String, messageId: String) {
+        if isMuted {
+            VoiceLoopCoordinator.shared.setState(.idle)
+            return
+        }
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try AVAudioSession.sharedInstance().setActive(true)
@@ -1176,6 +1486,10 @@ extension MessagingVC: MessageBoxDelegate {
         // immediate, so stamp the duration here. (didStart is unreliable on
         // some iOS versions and adds delegate complexity for a sub-frame win.)
         markAudioReady(forMessageId: messageId)
+        // Same reasoning as the audio-ready stamp: offline TTS starts
+        // playing within a frame of `.speak`, so flip the avatar to
+        // .speaking here rather than wiring the didStart delegate.
+        VoiceLoopCoordinator.shared.setState(.speaking)
         print("Offline TTS: speaking message \(messageId) with voice \(voice?.name ?? "system default") at \(speechSpeed.label)")
     }
     
@@ -1211,22 +1525,41 @@ extension MessagingVC {
         
         self.navigationItem.leftBarButtonItem?.tintColor = .secondarySystemBackground
         
-        // Right bar buttons: speaker (now opens a settings menu) + edit
-        muteButton = UIBarButtonItem(image: UIImage(systemName: isMuted ? "speaker.slash" : "speaker.wave.1"), menu: buildSpeakerMenu())
-        muteButton?.tintColor = .secondarySystemBackground
+        // Right bar buttons: speaker (now opens a settings menu) + edit.
+        // Gear + speaker land in a system-grouped pill, which dims their
+        // tint compared to the standalone hamburger/edit circles — bump
+        // both to `.label` and a heavier symbol weight so they read at
+        // the same brightness as the buttons on either side.
+        let inlineSymbolConfig = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+        muteButton = UIBarButtonItem(
+            image: UIImage(systemName: isMuted ? "speaker.slash" : "speaker.wave.1",
+                           withConfiguration: inlineSymbolConfig),
+            menu: buildSpeakerMenu()
+        )
+        muteButton?.tintColor = .secondaryLabel
 
         let editButton = UIBarButtonItem(image: UIImage(systemName: "square.and.pencil"), style: .done, target: self, action: #selector(rightBarButtonTapped))
         editButton.tintColor = .secondarySystemBackground
 
-        let settingsButton = UIBarButtonItem(image: UIImage(systemName: "gearshape"), style: .plain, target: self, action: #selector(settingsButtonTapped))
-        settingsButton.tintColor = .secondarySystemBackground
+        let settingsButton = UIBarButtonItem(
+            image: UIImage(systemName: "gearshape", withConfiguration: inlineSymbolConfig),
+            style: .plain,
+            target: self,
+            action: #selector(settingsButtonTapped)
+        )
+        settingsButton.tintColor = .secondaryLabel
 
         // Order: edit (leading), speaker, settings (trailing).
         self.navigationItem.rightBarButtonItems = [editButton, muteButton!, settingsButton]
     }
 
     private func updateMuteButtonAppearance() {
-        muteButton?.image = UIImage(systemName: isMuted ? "speaker.slash" : "speaker.wave.1")
+        // Match the weight configured in `setupNav()` — without it, the
+        // re-assignment falls back to the default thin SF Symbol weight
+        // and the icon dims again the next time mute is toggled.
+        let cfg = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+        muteButton?.image = UIImage(systemName: isMuted ? "speaker.slash" : "speaker.wave.1",
+                                     withConfiguration: cfg)
         // Rebuild so checkmarks reflect the new state on next tap.
         muteButton?.menu = buildSpeakerMenu()
         // Earcons follow the speaker mute toggle — turning off voice
@@ -1363,20 +1696,25 @@ extension MessagingVC {
     }
     
     func setupUI() {
-        let views: [UIView] = [tableView, messageBox, subAgentStatusBar]
+        let views: [UIView] = [tableView, messageBox, subAgentStatusBar, actionButtonReminderBar]
         for view in views {
             view.translatesAutoresizingMaskIntoConstraints = false
             self.view.addSubview(view)
         }
         subAgentStatusBar.delegate = self
+        actionButtonReminderBar.delegate = self
         bottomConstraint = messageBox.bottomAnchor.constraint(equalTo: self.view.bottomAnchor)
         NSLayoutConstraint.activate([
             subAgentStatusBar.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
             subAgentStatusBar.topAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.topAnchor),
             subAgentStatusBar.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
 
+            actionButtonReminderBar.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
+            actionButtonReminderBar.topAnchor.constraint(equalTo: subAgentStatusBar.bottomAnchor),
+            actionButtonReminderBar.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
+
             tableView.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
-            tableView.topAnchor.constraint(equalTo: subAgentStatusBar.bottomAnchor),
+            tableView.topAnchor.constraint(equalTo: actionButtonReminderBar.bottomAnchor),
             tableView.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: messageBox.topAnchor),
 
@@ -1446,6 +1784,11 @@ extension MessagingVC {
     @objc func rightBarButtonTapped() {
         // Create a new conversation
         createNewConversation()
+        // Reset the agent activity surface — the expanded AgentView keys
+        // off this for its transcript + active-tool caption, and bleeding
+        // the previous conversation's last reply into a fresh chat reads
+        // as broken state.
+        AgentActivityLog.shared.clear()
         
         let currentDate = Date()
         let dateFormatter = DateFormatter()
@@ -1599,11 +1942,18 @@ extension MessagingVC {
     
     // MARK: - Side Drawer Methods
     
-    private func showSideDrawer() {
-        guard sideDrawer == nil else { return }
-        
+    private func showSideDrawer(initialTab: String? = nil) {
+        if let existing = sideDrawer {
+            // Drawer already on-screen — just switch tabs in place.
+            if let tab = initialTab { existing.selectTab(tab) }
+            return
+        }
+
         sideDrawer = SideDrawerViewController()
         sideDrawer?.delegate = self
+        // Apply tab override before viewDidLoad runs so the segmented
+        // control restores on the right tab without a flicker.
+        if let tab = initialTab { sideDrawer?.pendingInitialTab = tab }
         
         // Hide navigation bar to allow drawer to fully overlay
         navigationController?.setNavigationBarHidden(true, animated: false)
@@ -1684,6 +2034,15 @@ extension MessagingVC: UITableViewDelegate, UITableViewDataSource {
         }
         let cell = tableView.dequeueReusableCell(withIdentifier: "cell", for: indexPath) as! MessagingCell
         let message = self.visible_messages[indexPath.row]
+        // Delegates MUST be assigned before setData. applyOnboardingCard
+        // reads `cell.onboardingDelegate` synchronously and hands it to the
+        // card view's apply(); if we set it after, the card captures a nil
+        // delegate and every Continue / Skip / paste tap silently no-ops.
+        // image/pdf delegates are stable on the cell so their order doesn't
+        // matter — moved up here to keep all three together.
+        cell.imageDelegate = self
+        cell.pdfDelegate = self
+        cell.onboardingDelegate = self
         cell.setData(data: message, shouldAnimate: message.id == self.messageIdToAnimate)
         if message.id == self.messageIdToAnimate {
             self.messageIdToAnimate = nil
@@ -1691,10 +2050,6 @@ extension MessagingVC: UITableViewDelegate, UITableViewDataSource {
         // Reapply any in-flight or completed TTS status so cells coming back
         // from reuse don't lose their spinner / "| 2.03s to audio" suffix.
         cell.setTTSStatus(ttsStatuses[message.id] ?? .none)
-        // Image-bubble cells get a delegate so download/retry taps route back
-        // through this VC. Reuse-safe: the delegate is reapplied on every
-        // dequeue and the cell stores the active attachment id.
-        cell.imageDelegate = self
 
         return cell
     }
@@ -1904,6 +2259,11 @@ extension MessagingVC {
             DispatchQueue.main.async {
                 didReceiveAudio = true
                 self?.markAudioReady(forMessageId: messageId)
+                // First PCM out of Aura = audio is hitting the speaker
+                // right now. Flip the avatar to .speaking here so the
+                // green pulse aligns with sound, not with our request.
+                guard self?.currentSpeechMessageId == messageId else { return }
+                VoiceLoopCoordinator.shared.setState(.speaking)
             }
         }
         tts.onError = { [weak self] err in
@@ -2126,6 +2486,10 @@ extension MessagingVC {
             self.audioPlayer = player
             player.play()
             self.markAudioReady(forMessageId: messageId)
+            // Audio is now hitting the speaker — flip the avatar to
+            // .speaking so the green pulse pairs with sound rather than
+            // the network request that kicked the playback off.
+            VoiceLoopCoordinator.shared.setState(.speaking)
             print("\(providerLabel)TTS: playback started for \(messageId)")
         } catch {
             print("\(providerLabel)TTS playback error: \(error) — falling back to offline")
@@ -2278,6 +2642,28 @@ extension MessagingVC: ImageSkillHost {
         }
     }
 
+    /// Same sweep for stuck PDFs — the WKWebView job that owned them is
+    /// gone after a relaunch, so flip them to .failed with a "tap retry"
+    /// hint. Called alongside `cleanupStuckImageGenerations` from
+    /// viewDidLoad.
+    fileprivate func cleanupStuckPDFGenerations() {
+        var changed = false
+        for idx in self.messages.indices {
+            if var attachment = self.messages[idx].pdfAttachment,
+               attachment.status == .generating {
+                attachment.status = .failed
+                attachment.failureReason = "PDF generation was interrupted (app restart). Tap Try again to regenerate."
+                self.messages[idx].pdfAttachment = attachment
+                changed = true
+            }
+        }
+        if changed {
+            DispatchQueue.main.async { [weak self] in
+                self?.tableView.reloadData()
+            }
+        }
+    }
+
     /// Cold-launch sweep — flip any imageAttachment still in .generating to
     /// .failed. The HTTP task that owned them is gone, so we'd otherwise
     /// leave the user staring at a forever-spinner. Called from viewDidLoad
@@ -2298,6 +2684,114 @@ extension MessagingVC: ImageSkillHost {
                 self?.tableView.reloadData()
             }
         }
+    }
+}
+
+// MARK: - PDFSkillHost
+
+extension MessagingVC: PDFSkillHost {
+
+    func pdfSkillDidStartGenerating(_ attachment: PDFAttachment) {
+        // Retry path: a placeholder for this id already exists — flip its
+        // state back to .generating in place.
+        if let idx = self.messages.firstIndex(where: { $0.pdfAttachment?.id == attachment.id }) {
+            self.messages[idx].pdfAttachment = attachment
+            DispatchQueue.main.async {
+                if let visibleIdx = self.visible_messages.firstIndex(where: { $0.pdfAttachment?.id == attachment.id }) {
+                    let path = IndexPath(row: visibleIdx, section: 0)
+                    self.tableView.reloadRows(at: [path], with: .none)
+                } else {
+                    self.tableView.reloadData()
+                }
+            }
+            return
+        }
+
+        let placeholder = MessageStruct(
+            id: "pdf-\(attachment.id)",
+            role: "assistant",
+            content: "",
+            model: "loop-pdf",
+            pdfAttachment: attachment
+        )
+        let conversation = ensureCurrentConversation()
+        conversationManager.addMessage(placeholder, to: conversation)
+        currentConversationEntity = conversationManager.currentConversation
+        self.messages.append(placeholder)
+        DispatchQueue.main.async {
+            self.tableView.reloadData()
+            self.scrollToLastMessage()
+        }
+    }
+
+    func pdfSkillDidFinishGenerating(_ attachment: PDFAttachment) {
+        // Find the placeholder and mutate its attachment in place so the
+        // cell flips spinner → thumbnail without losing scroll position.
+        guard let idx = self.messages.firstIndex(where: { $0.pdfAttachment?.id == attachment.id }) else {
+            return
+        }
+        self.messages[idx].pdfAttachment = attachment
+        DispatchQueue.main.async {
+            if let visibleIdx = self.visible_messages.firstIndex(where: { $0.pdfAttachment?.id == attachment.id }) {
+                let path = IndexPath(row: visibleIdx, section: 0)
+                self.tableView.reloadRows(at: [path], with: .none)
+            } else {
+                self.tableView.reloadData()
+            }
+        }
+    }
+}
+
+// MARK: - MessagingCellPDFDelegate
+
+extension MessagingVC: MessagingCellPDFDelegate {
+
+    func messagingCellDidTapPDFPreview(attachmentId: String) {
+        guard let url = pdfURL(for: attachmentId) else { return }
+        let preview = QLPreviewController()
+        let source = MessagingCellQLSource(url: url)
+        preview.dataSource = source
+        // QLPreviewController only weakly retains its data source — pin
+        // the source to the preview's associated objects so it survives
+        // the present animation.
+        objc_setAssociatedObject(preview, &MessagingCellQLSource.assocKey, source,
+                                 .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        present(preview, animated: true)
+    }
+
+    func messagingCellDidTapPDFShare(attachmentId: String, sourceView: UIView) {
+        guard let url = pdfURL(for: attachmentId) else { return }
+        let activity = UIActivityViewController(activityItems: [url],
+                                                 applicationActivities: nil)
+        // iPad needs a popover anchor; pinning to the tapped share button
+        // means the sheet rises out of the cell where it was triggered.
+        if let pop = activity.popoverPresentationController {
+            pop.sourceView = sourceView
+            pop.sourceRect = sourceView.bounds
+        }
+        present(activity, animated: true)
+    }
+
+    func messagingCellDidTapPDFRetry(attachmentId: String) {
+        guard let attachment = self.messages.first(where: { $0.pdfAttachment?.id == attachmentId })?.pdfAttachment
+        else { return }
+        let convId = conversationManager.currentConversation?.id
+        PDFGenerationService.shared.retry(attachmentId: attachment.id,
+                                          title: attachment.title,
+                                          document: attachment.document,
+                                          template: attachment.template,
+                                          conversationId: convId)
+    }
+
+    private func pdfURL(for attachmentId: String) -> URL? {
+        guard let attachment = self.messages
+                .first(where: { $0.pdfAttachment?.id == attachmentId })?
+                .pdfAttachment,
+              attachment.status == .ready,
+              let url = attachment.fileURL,
+              FileManager.default.fileExists(atPath: url.path)
+        else { return nil }
+        return url
     }
 }
 
@@ -2497,3 +2991,213 @@ extension MessagingVC: SubAgentStatusBarDelegate {
         playMessageSynthesizer(message: speechMessage)
     }
 }
+
+// MARK: - Onboarding hooks
+
+extension MessagingVC: OnboardingCoordinatorHost, OnboardingCardDelegate {
+
+    /// Coordinator → host: append a scripted message into the chat and
+    /// reload. Persists through `conversationManager` so the welcome turns
+    /// survive relaunch and appear in the side drawer. Calls
+    /// `newMessageSent()` so MainVC's hero orb collapses into the nav-bar
+    /// avatar — the empty-state hero shouldn't sit on top of onboarding
+    /// cards.
+    func onboardingPostMessage(_ message: MessageStruct) {
+        let conversation = ensureCurrentConversation()
+        self.messages.append(message)
+        conversationManager.addMessage(message, to: conversation)
+        currentConversationEntity = conversationManager.currentConversation
+        newMessageSent()
+        tableView.reloadData()
+        // Two-stage scroll: the first pass fires after reloadData's layout
+        // so the cell self-sizes, the second covers the case where the
+        // keyboard adjusted the table's bottom inset between layout passes
+        // (common right after the user replies to .askName — the LLM call
+        // returns async while the keyboard is still up, then post-keyboard
+        // dismissal the inset shrinks and `.top` alignment would otherwise
+        // leave the new bubble off-screen). `.bottom` keeps the bubble
+        // pinned above the input bar in both states.
+        DispatchQueue.main.async { [weak self] in
+            self?.scrollOnboardingToBottom()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.scrollOnboardingToBottom()
+        }
+    }
+
+    /// Scroll the chat so the most recently posted bubble sits at the
+    /// bottom of the visible area, just above the input bar / keyboard.
+    /// Uses `tableView.contentSize` rather than scrolling to a row index
+    /// so the math stays right even when the new cell's height hasn't been
+    /// reported yet.
+    private func scrollOnboardingToBottom() {
+        guard tableView.numberOfRows(inSection: 0) > 0 else { return }
+        let lastRow = tableView.numberOfRows(inSection: 0) - 1
+        tableView.scrollToRow(at: IndexPath(row: lastRow, section: 0),
+                              at: .bottom,
+                              animated: true)
+    }
+
+    /// Coordinator → host: swap the named message's `onboardingCard` to
+    /// `.answered` so the chip row collapses. Reloads just that row so
+    /// scroll position is preserved.
+    func onboardingMarkAnswered(messageId: String) {
+        guard let idx = self.messages.firstIndex(where: { $0.id == messageId }) else { return }
+        self.messages[idx].onboardingCard = .answered
+        // Visible-row index can differ from messages-array index since
+        // `visible_messages` filters out system/function turns.
+        guard let visibleIdx = self.visible_messages.firstIndex(where: { $0.id == messageId }) else {
+            tableView.reloadData()
+            return
+        }
+        tableView.reloadRows(at: [IndexPath(row: visibleIdx, section: 0)], with: .fade)
+    }
+
+    /// Coordinator → host: prefill the bottom messageBox so the user can
+    /// edit-and-send the default for this step (e.g. the name suggestion
+    /// "Loop"). Cursor goes to end. Caller is responsible for clearing the
+    /// field when the step advances if desired — today we just trust the
+    /// user to delete what they don't want.
+    func onboardingPrefillMessageBox(_ text: String) {
+        messageBox.textView.text = text
+        // Triggering the text-change machinery so the send button enables.
+        messageBox.textViewDidChange(messageBox.textView)
+    }
+
+    /// Coordinator → host: raise the keyboard so the user can start typing
+    /// straight after a scripted prompt (currently the greeting). Deferred
+    /// one runloop so the table reload that posted the prompt finishes
+    /// before the keyboard animation starts — otherwise the new bubble
+    /// gets briefly clipped under the rising keyboard before scroll catches up.
+    func onboardingFocusMessageBox() {
+        DispatchQueue.main.async { [weak self] in
+            self?.messageBox.textView.becomeFirstResponder()
+        }
+    }
+
+    /// Coordinator → host: open the named integration's connect flow.
+    /// IntegrationsVC currently lists all integrations rather than focusing
+    /// on one, so we present the whole list and the user taps their pick.
+    func onboardingRequestIntegration(_ kind: OnboardingIntegrationKind) {
+        let nav = UINavigationController(rootViewController: IntegrationsVC())
+        present(nav, animated: true)
+    }
+
+    /// Coordinator → host: onboarding finished. Today there's no extra
+    /// chrome to tear down — the cell layer reads `OnboardingState.isComplete`
+    /// indirectly via the coordinator's guard, and the reminder banner reads
+    /// `OnboardingState` directly.
+    func onboardingDidComplete() {
+        // No-op for now.
+    }
+
+    /// Card view → host: chip taps + action-button events. Forward to the
+    /// coordinator first (state-machine update), then layer on UI side
+    /// effects (the only one left is "Open Settings" → deep link).
+    func onboardingCardDidFire(_ event: OnboardingCardEvent) {
+        OnboardingCoordinator.shared.handleCardEvent(event)
+
+        switch event {
+        case .actionButtonOpenSettings:
+            openActionButtonSettings()
+        default:
+            break
+        }
+    }
+
+    /// Best-effort deep link into Settings → Action Button. Same candidate
+    /// list the old modal used — there's no public API, so we try the most
+    /// specific URL first and degrade. Even when iOS 18+ collapses these to
+    /// the app's own Settings page, the on-card numbered steps carry the
+    /// user the rest of the way.
+    fileprivate func openActionButtonSettings() {
+        let candidates = [
+            "settings-navigation://",
+            "prefs://",
+            "prefs:root=ACTION_BUTTON",
+            "App-Prefs:root=ACTION_BUTTON",
+            "App-Prefs:ACTION_BUTTON",
+            "settings-navigation://com.apple.Settings.ActionButton",
+        ]
+        tryOpenActionButtonSettings(candidates)
+    }
+
+    private func tryOpenActionButtonSettings(_ candidates: [String]) {
+        var remaining = candidates
+        guard !remaining.isEmpty else { return }
+        let next = remaining.removeFirst()
+        guard let url = URL(string: next) else {
+            tryOpenActionButtonSettings(remaining)
+            return
+        }
+        UIApplication.shared.open(url, options: [:]) { [weak self] success in
+            if !success { self?.tryOpenActionButtonSettings(remaining) }
+        }
+    }
+}
+
+// MARK: - Action Button reminder banner
+
+extension MessagingVC: ActionButtonReminderBarDelegate {
+    /// Tap on the pill body — present the walkthrough as a modal sheet so the
+    /// user can either head to Settings or skip without going through the
+    /// full onboarding script again. Re-uses the same Settings-style steps
+    /// card from the onboarding flow.
+    func actionButtonReminderBarTapped() {
+        let card = OnboardingCardView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.apply(.actionButtonWalkthrough, delegate: nil)
+
+        let modal = UIViewController()
+        // Grouped background (light gray in light mode) so the sheet keeps
+        // the same body tint at .large() that it has at .medium() — using
+        // `.systemBackground` makes the fullscreen detent flip to pure
+        // white while the half-sheet stays gray.
+        modal.view.backgroundColor = .systemGroupedBackground
+        modal.view.addSubview(card)
+        NSLayoutConstraint.activate([
+            card.leadingAnchor.constraint(equalTo: modal.view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            card.trailingAnchor.constraint(equalTo: modal.view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            card.topAnchor.constraint(equalTo: modal.view.safeAreaLayoutGuide.topAnchor, constant: 24),
+        ])
+
+        // Wire the card's "Open Settings" / "Skip" buttons to lightweight
+        // handlers — no need to advance the onboarding script post-completion.
+        let delegate = ReminderCardDelegate { [weak self, weak modal] event in
+            switch event {
+            case .actionButtonOpenSettings:
+                self?.openActionButtonSettings()
+            case .actionButtonSkip:
+                modal?.dismiss(animated: true)
+                // Snooze again — user actively dismissed.
+                OnboardingState.actionButtonReminderDismissedAt = Date()
+                self?.actionButtonReminderBar.refresh()
+            default:
+                break
+            }
+        }
+        card.delegate = delegate
+        // Keep the inline delegate alive for the life of the modal.
+        objc_setAssociatedObject(modal, &reminderDelegateKey, delegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+
+        if let sheet = modal.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+        }
+        present(modal, animated: true)
+    }
+
+    func actionButtonReminderBarDismissed() {
+        // The bar refreshes itself on dismiss tap; nothing extra to do here.
+    }
+}
+
+/// Inline `OnboardingCardDelegate` shim used by the reminder modal — it
+/// owns its closure and doesn't participate in the main onboarding script.
+private final class ReminderCardDelegate: OnboardingCardDelegate {
+    private let onEvent: (OnboardingCardEvent) -> Void
+    init(onEvent: @escaping (OnboardingCardEvent) -> Void) { self.onEvent = onEvent }
+    func onboardingCardDidFire(_ event: OnboardingCardEvent) { onEvent(event) }
+}
+
+private var reminderDelegateKey: UInt8 = 0

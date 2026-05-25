@@ -43,6 +43,12 @@ final class OnboardingWindowController: NSWindowController {
     private var launchPollTimer: Timer?
     private var stateObserver: ((VoiceLoopCoordinator.State) -> Void)?
     private var previousOnStateChange: ((VoiceLoopCoordinator.State) -> Void)?
+    /// Listener token for `.voiceLoopUserMessageSubmitted`. Kept around so
+    /// step 4 can dismiss itself when the user's first message lands —
+    /// including the case where the conversational onboarding consumes the
+    /// text inline (which means `state` never transitions through
+    /// `.thinking`, so the state-observer branch alone misses it).
+    private var firstTurnSubmitObserver: NSObjectProtocol?
     /// Step 4 popup + its "menu about to open" observer, so we can repopulate
     /// the device list each time the user clicks the chevron.
     private weak var micPopup: NSPopUpButton?
@@ -151,6 +157,10 @@ final class OnboardingWindowController: NSWindowController {
             coordinator?.onStateChange = prev
             previousOnStateChange = nil
         }
+        if let obs = firstTurnSubmitObserver {
+            NotificationCenter.default.removeObserver(obs)
+            firstTurnSubmitObserver = nil
+        }
 
         contentContainer.subviews.forEach { $0.removeFromSuperview() }
 
@@ -207,6 +217,12 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     private func complete() {
+        // Idempotent — both the `.thinking` state change AND the
+        // `.voiceLoopUserMessageSubmitted` notification can fire for the
+        // same turn (typed → LLM path). The `isComplete` guard means the
+        // second call returns immediately rather than running teardown
+        // twice or invoking `onCompleted` a second time.
+        guard !MacOnboardingState.isComplete else { return }
         MacOnboardingState.isComplete = true
         // Restore any callback we hijacked while watching for the first turn.
         if let prev = previousOnStateChange {
@@ -216,6 +232,10 @@ final class OnboardingWindowController: NSWindowController {
         if let obs = micPopupObserver {
             NotificationCenter.default.removeObserver(obs)
             micPopupObserver = nil
+        }
+        if let obs = firstTurnSubmitObserver {
+            NotificationCenter.default.removeObserver(obs)
+            firstTurnSubmitObserver = nil
         }
         recorder?.isSuppressed = false
         onCompleted?()
@@ -547,10 +567,18 @@ final class OnboardingWindowController: NSWindowController {
         MicrophoneManager.shared.selectedUID = uid
     }
 
-    /// Subscribes to coordinator state for the lifetime of step 4. The first
-    /// time we see `.thinking` (which can only fire after a successful turn
-    /// has been sent), we treat onboarding as done and let the conversation
-    /// window take over.
+    /// Subscribes to coordinator state for the lifetime of step 4. We watch
+    /// two signals because they don't overlap:
+    ///
+    /// - `state == .thinking` covers the LLM-bound path (typed message
+    ///   submitted to the model, voice transcript routed through Cloud).
+    /// - `voiceLoopUserMessageSubmitted` covers the case where the
+    ///   conversational onboarding script consumes the text inline — the
+    ///   coordinator's state never leaves `.idle` in that flow, so a
+    ///   state-only observer would never dismiss this window.
+    ///
+    /// Either fires the same `complete()` path; the second fire is a no-op
+    /// because `complete()` is idempotent (tears down both observers).
     private func observeFirstTurn() {
         guard let coord = coordinator else { return }
         previousOnStateChange = coord.onStateChange
@@ -561,6 +589,13 @@ final class OnboardingWindowController: NSWindowController {
             if state == .thinking {
                 DispatchQueue.main.async { self?.complete() }
             }
+        }
+        firstTurnSubmitObserver = NotificationCenter.default.addObserver(
+            forName: .voiceLoopUserMessageSubmitted,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.complete()
         }
     }
 
