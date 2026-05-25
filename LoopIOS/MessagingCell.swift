@@ -485,7 +485,7 @@ class MessagingCell: UITableViewCell {
             // routing through the single-text-view + animation path.
             // Streaming animation is skipped here because table responses
             // are typically already complete by the time they render.
-            if MarkdownSegmenter.containsTable(in: data.content) {
+            if MarkdownSegmenter.containsRichContent(in: data.content) {
                 applyRichContent(data: data)
                 return
             }
@@ -793,6 +793,9 @@ class MessagingCell: UITableViewCell {
             case .table(let table):
                 let view = makeTableView(table: table)
                 richContentStack.addArrangedSubview(view)
+            case .codeBlock(let block):
+                let view = makeCodeBlockView(block: block)
+                richContentStack.addArrangedSubview(view)
             }
         }
 
@@ -850,6 +853,55 @@ class MessagingCell: UITableViewCell {
         tv.textColor = .label
         tv.attributedText = attributedString(from: text)
         return tv
+    }
+
+    /// Builds a rounded container with monospaced code text, a subtle
+    /// background, and an optional language label in the top-right corner.
+    private func makeCodeBlockView(block: MarkdownCodeBlock) -> UIView {
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.backgroundColor = UIColor.label.withAlphaComponent(0.06)
+        container.layer.cornerRadius = 8
+        container.layer.cornerCurve = .continuous
+        container.layer.masksToBounds = true
+
+        let codeTV = UITextView()
+        codeTV.translatesAutoresizingMaskIntoConstraints = false
+        codeTV.isScrollEnabled = false
+        codeTV.isEditable = false
+        codeTV.isSelectable = true
+        codeTV.backgroundColor = .clear
+        codeTV.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        codeTV.textContainer.lineFragmentPadding = 0
+        let codeFont = UIFont.monospacedSystemFont(
+            ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize - 1, weight: .regular)
+        codeTV.attributedText = NSAttributedString(string: block.code, attributes: [
+            .font: codeFont,
+            .foregroundColor: UIColor.label,
+        ])
+        container.addSubview(codeTV)
+
+        NSLayoutConstraint.activate([
+            codeTV.topAnchor.constraint(equalTo: container.topAnchor),
+            codeTV.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            codeTV.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            codeTV.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
+
+        if let lang = block.language, !lang.isEmpty {
+            let label = UILabel()
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.text = lang
+            label.font = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+            label.textColor = .secondaryLabel
+            container.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+                label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+            ])
+        }
+
+        return container
     }
 
     /// Build a UIStackView grid for `table`. Rows are full-width with

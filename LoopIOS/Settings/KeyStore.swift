@@ -39,6 +39,10 @@ final class KeyStore {
         case githubBaseURL          = "GITHUB_BASE_URL"
         case devin                  = "DEVIN_API_KEY"
         case devinOrgID             = "DEVIN_ORG_ID"
+        case xAPIKey                = "X_API_KEY"
+        case xAPISecret             = "X_API_SECRET"
+        case xAccessToken           = "X_ACCESS_TOKEN"
+        case xAccessTokenSecret     = "X_ACCESS_TOKEN_SECRET"
 
         /// User-facing label shown in Settings.
         var displayName: String {
@@ -59,6 +63,10 @@ final class KeyStore {
             case .githubBaseURL:          return "GitHub API Base URL"
             case .devin:                  return "Devin API Key"
             case .devinOrgID:             return "Devin Organization ID"
+            case .xAPIKey:                return "X API Key"
+            case .xAPISecret:             return "X API Secret"
+            case .xAccessToken:           return "X Access Token"
+            case .xAccessTokenSecret:     return "X Access Token Secret"
             }
         }
 
@@ -81,6 +89,10 @@ final class KeyStore {
             case .githubBaseURL:          return "Optional. Defaults to https://api.github.com. Set for GitHub Enterprise (e.g. https://github.acme.com/api/v3)"
             case .devin:                  return "cog_… service-user API key from app.devin.ai → Settings → Service Users. Used with the Devin v3 API; pair it with the Devin Organization ID below."
             case .devinOrgID:             return "Required. Looks like org-…. Find it in app.devin.ai → Settings → Service Users (shown next to your service users)."
+            case .xAPIKey:                return "OAuth 1.0a consumer key from developer.x.com → Your App → Keys & Tokens"
+            case .xAPISecret:             return "OAuth 1.0a consumer secret — shown once when you regenerate the API key"
+            case .xAccessToken:           return "User-level access token with read+write permission from developer.x.com"
+            case .xAccessTokenSecret:     return "User-level access token secret — shown once at generation time"
             }
         }
     }
@@ -94,6 +106,7 @@ final class KeyStore {
         case openAI, anthropic, kimi, deepgram, elevenLabs, exa
         case cursor, devin
         case github, slack, notion, obsidian
+        case twitter
 
         /// Row title in the list + window title in the editor.
         var displayName: String {
@@ -110,6 +123,7 @@ final class KeyStore {
             case .slack:      return "Slack"
             case .notion:     return "Notion"
             case .obsidian:   return "Obsidian"
+            case .twitter:    return "X (Twitter)"
             }
         }
 
@@ -131,6 +145,7 @@ final class KeyStore {
             case .slack:      return "Read channels/DMs/mentions, search, and send messages with confirmation"
             case .notion:     return "Read and write Notion pages and databases"
             case .obsidian:   return "Read and write your Obsidian vault through a self-hosted relay"
+            case .twitter:    return "Post tweets to X (Twitter) with OAuth 1.0a"
             }
         }
 
@@ -153,6 +168,7 @@ final class KeyStore {
             case .slack:      return [.slackUserToken]
             case .notion:     return [.notionIntegrationToken]
             case .obsidian:   return [.obsidianAPI, .obsidianBaseURL, .obsidianVaultName]
+            case .twitter:    return [.xAPIKey, .xAPISecret, .xAccessToken, .xAccessTokenSecret]
             }
         }
 

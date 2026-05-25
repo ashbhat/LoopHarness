@@ -355,10 +355,10 @@ enum SubAgentRuntime {
     /// agent spawning another sub-agent could fan out unboundedly. If the
     /// model tries, we return a function result explaining that.
     private static func dispatchTool(function: FunctionCallStruct) async -> MessageStruct {
-        if function.name == "spawn_sub_agent" {
+        if function.name == "spawn_sub_agent" || function.name == "cancel_sub_agent" {
             return MessageStruct(
                 role: "function",
-                content: "Sub-agents cannot spawn further sub-agents in v1. Continue this task yourself.",
+                content: "Sub-agents cannot manage other sub-agents in v1. Continue this task yourself.",
                 name: function.name
             )
         }

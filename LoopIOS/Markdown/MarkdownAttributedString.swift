@@ -26,14 +26,43 @@ enum MarkdownAttributedString {
     /// patterns are static) so a malformed input can never crash the
     /// renderer.
     static func render(_ text: String) -> NSAttributedString {
-        let fullRange = NSRange(location: 0, length: text.count)
+        let bodyFont = UIFont.preferredFont(forTextStyle: .body)
         let attributedString = NSMutableAttributedString(
             string: text,
             attributes: [
-                .font: UIFont.preferredFont(forTextStyle: .body),
+                .font: bodyFont,
                 .foregroundColor: UIColor.label
             ]
         )
+
+        // Fenced code blocks: ```lang\n…\n```. Strip the fence markers and
+        // style the interior as a monospaced block with a tinted background.
+        // Processed first so later passes (headers, bold, links) never touch
+        // source code inside a fence.
+        do {
+            let fencedRegex = try NSRegularExpression(
+                pattern: "(?m)^[ \\t]*(`{3,}|~{3,})[^\\n]*\\n([\\s\\S]*?)^[ \\t]*\\1[ \\t]*$",
+                options: [.anchorsMatchLines]
+            )
+            let fencedMatches = fencedRegex.matches(
+                in: attributedString.string,
+                options: [],
+                range: NSRange(location: 0, length: attributedString.length)
+            )
+            let codeFont = UIFont.monospacedSystemFont(ofSize: bodyFont.pointSize - 1, weight: .regular)
+            let codeBg = UIColor.label.withAlphaComponent(0.06)
+            for match in fencedMatches.reversed() {
+                let codeRange = match.range(at: 2)
+                guard codeRange.location != NSNotFound else { continue }
+                let codeText = (attributedString.string as NSString).substring(with: codeRange)
+                let replacement = NSMutableAttributedString(string: codeText, attributes: [
+                    .font: codeFont,
+                    .foregroundColor: UIColor.label,
+                    .backgroundColor: codeBg,
+                ])
+                attributedString.replaceCharacters(in: match.range, with: replacement)
+            }
+        } catch {}
 
         do {
             // Headers — '#' through '######'. We walk matches in reverse so
@@ -42,11 +71,15 @@ enum MarkdownAttributedString {
                 pattern: "^(#{1,6})\\s*(.*?)$",
                 options: [.anchorsMatchLines]
             )
-            let headerMatches = headerRegex.matches(in: text, options: [], range: fullRange)
+            let headerMatches = headerRegex.matches(
+                in: attributedString.string,
+                options: [],
+                range: NSRange(location: 0, length: attributedString.length)
+            )
             for match in headerMatches.reversed() {
                 let headerLevel = match.range(at: 1).length
-                if let headerContentRange = Range(match.range(at: 2), in: text) {
-                    let headerText = String(text[headerContentRange])
+                if let headerContentRange = Range(match.range(at: 2), in: attributedString.string) {
+                    let headerText = String(attributedString.string[headerContentRange])
                     let headerFont = UIFont.boldSystemFont(
                         ofSize: UIFont.preferredFont(forTextStyle: .title3).pointSize
                             - CGFloat(headerLevel - 1) * 2
@@ -83,6 +116,31 @@ enum MarkdownAttributedString {
                     )
                     attributedString.replaceCharacters(in: match.range, with: boldAttributedString)
                 }
+            }
+
+            // Inline code: `text`. Monospaced font with a subtle background.
+            // Runs after bold so backtick-wrapped content inside **bold `code`**
+            // picks up the code styling. Skips ranges already styled as code
+            // blocks (which carry .backgroundColor from the fenced pass above).
+            let inlineCodeRegex = try NSRegularExpression(pattern: "`([^`\\n]+)`", options: [])
+            let inlineCodeMatches = inlineCodeRegex.matches(
+                in: attributedString.string,
+                options: [],
+                range: NSRange(location: 0, length: attributedString.length)
+            )
+            let inlineCodeFont = UIFont.monospacedSystemFont(ofSize: bodyFont.pointSize - 0.5, weight: .regular)
+            let inlineCodeBg = UIColor.label.withAlphaComponent(0.08)
+            for match in inlineCodeMatches.reversed() {
+                let innerRange = match.range(at: 1)
+                guard innerRange.location != NSNotFound else { continue }
+                if attributedString.attribute(.backgroundColor, at: match.range.location, effectiveRange: nil) != nil { continue }
+                let codeText = (attributedString.string as NSString).substring(with: innerRange)
+                let code = NSAttributedString(string: codeText, attributes: [
+                    .font: inlineCodeFont,
+                    .foregroundColor: UIColor.label,
+                    .backgroundColor: inlineCodeBg,
+                ])
+                attributedString.replaceCharacters(in: match.range, with: code)
             }
 
             // [text](url) markdown links.

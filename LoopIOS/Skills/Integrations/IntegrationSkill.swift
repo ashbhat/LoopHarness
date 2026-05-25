@@ -430,6 +430,10 @@ Tips:
         case .githubBaseURL:          return "github_base_url"
         case .devin:                  return "devin"
         case .devinOrgID:             return "devin_org_id"
+        case .xAPIKey:                return "x_api_key"
+        case .xAPISecret:             return "x_api_secret"
+        case .xAccessToken:           return "x_access_token"
+        case .xAccessTokenSecret:     return "x_access_token_secret"
         }
     }
 
@@ -485,6 +489,11 @@ Tips:
         case "github_base_url", "github base url", "ghe":     return .githubBaseURL
         case "devin":                                         return .devin
         case "devin_org_id", "devin org id", "devin_org":     return .devinOrgID
+        case "x_api_key", "twitter_api_key":                  return .xAPIKey
+        case "x_api_secret", "twitter_api_secret":            return .xAPISecret
+        case "x_access_token", "twitter_access_token":        return .xAccessToken
+        case "x_access_token_secret",
+             "twitter_access_token_secret":                   return .xAccessTokenSecret
         default:                                              return nil
         }
     }
