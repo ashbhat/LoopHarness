@@ -19,6 +19,7 @@
 //  functions; the registry splits the prefix back off on dispatch.
 //
 
+import CryptoKit
 import Foundation
 import Security
 
@@ -42,6 +43,12 @@ final class MCPRegistry {
 
     private let fm = FileManager.default
     private let queue = DispatchQueue(label: "loop.mcpregistry", qos: .userInitiated)
+    /// One long-lived MCPClient per installed server so the `initialize`
+    /// handshake fires once per session instead of once per tool call. Keyed
+    /// by slug; the entry is dropped on uninstall/disable so a stale session
+    /// can't outlive the record.
+    private var clients: [String: MCPClient] = [:]
+    private let clientsLock = NSLock()
     /// Keychain service for MCP bearer tokens. Lives in its own service so
     /// the existing KeyStore keychain bucket (which enumerates a fixed Key
     /// enum) doesn't need to know about per-server slugs.
@@ -114,7 +121,7 @@ final class MCPRegistry {
             completion(.failure(MCPClientError.invalidURL)); return
         }
 
-        let slug = Self.slug(from: url)
+        let slug = resolveSlug(forURL: urlString, parsedURL: url)
 
         // Pre-write the token to Keychain so the client can pick it up via
         // the same path live edits use. Empty token deletes any prior value.
@@ -162,6 +169,7 @@ final class MCPRegistry {
         }
         removeFromDisk(slug: slug)
         Self.writeToken(nil, slug: slug)
+        dropClient(slug: slug)
         didReload?()
     }
 
@@ -176,6 +184,9 @@ final class MCPRegistry {
         }
         if let r = changed {
             try? writeToDisk(r)
+            // Disable drops the cached client so the next enable rebuilds it
+            // against the current token + a fresh session.
+            if !enabled { dropClient(slug: slug) }
             didReload?()
         }
     }
@@ -183,56 +194,69 @@ final class MCPRegistry {
     /// Re-fetch every enabled server's `tools/list` and update the cache.
     /// Called from AgentHarness on each turn; cheap enough since most users
     /// will have 0–2 servers installed.
-    @discardableResult
-    func reload() -> Bool {
-        // Snapshot on the queue so this is safe to call from the main thread.
+    ///
+    /// Fully non-blocking — kicks off the per-server fetches and returns
+    /// immediately. Updates land via `didReload` (and `completion`, if
+    /// supplied) when every fetch settles. The current turn always uses
+    /// the cached tools; a slow server just delays its own next-turn
+    /// refresh instead of stalling any thread.
+    func reload(completion: (() -> Void)? = nil) {
+        // Snapshot on the queue so this is safe to call from any thread.
         let snapshot = queue.sync { servers }
-        guard !snapshot.isEmpty else { return false }
+        let enabledServers = snapshot.filter { $0.enabled }
+        guard !enabledServers.isEmpty else {
+            if let c = completion { DispatchQueue.main.async(execute: c) }
+            return
+        }
 
         let group = DispatchGroup()
-        var anyChange = false
         let updatesLock = NSLock()
         var updates: [String: [MCPTool]] = [:]
 
-        for server in snapshot where server.enabled {
-            guard let url = URL(string: server.url) else { continue }
+        for server in enabledServers {
+            guard let client = self.client(for: server) else { continue }
             group.enter()
-            let client = MCPClient(url: url, bearerToken: Self.readToken(slug: server.slug))
-            // We need to re-initialize because session ids are per-client.
-            client.initialize { [weak client] initResult in
-                guard case .success = initResult, let client = client else {
+            // Reuses the cached session if one is live; only handshakes if
+            // the client is new or the session was invalidated by a 404.
+            // The 5s timeout on `listTools` keeps the hung-server guarantee:
+            // a slow server fails its catalog fetch fast without affecting
+            // in-flight `tools/call` requests on the same client.
+            client.ensureInitialized { [weak self] initResult in
+                if case .failure(let e) = initResult {
+                    self?.handleSessionError(e, slug: server.slug)
                     group.leave(); return
                 }
-                client.listTools { listResult in
-                    if case .success(let tools) = listResult {
+                client.listTools(timeout: 5) { [weak self] listResult in
+                    switch listResult {
+                    case .success(let tools):
                         updatesLock.lock()
                         updates[server.slug] = tools
                         updatesLock.unlock()
+                    case .failure(let e):
+                        self?.handleSessionError(e, slug: server.slug)
                     }
                     group.leave()
                 }
             }
         }
 
-        // Block briefly — refresh is called on every chat turn (the same path
-        // DynamicSkillRegistry.reload uses) so it must return promptly. If
-        // the network is slow we keep the cached tools and try again next
-        // turn; not racing here keeps the harness's reload contract.
-        _ = group.wait(timeout: .now() + 5)
-
-        queue.sync {
+        group.notify(queue: queue) { [weak self] in
+            guard let self = self else {
+                if let c = completion { DispatchQueue.main.async(execute: c) }
+                return
+            }
+            var anyChange = false
             for (slug, tools) in updates {
-                guard let idx = servers.firstIndex(where: { $0.slug == slug }) else { continue }
-                if !Self.tools(tools, equal: servers[idx].cachedTools) {
-                    servers[idx].cachedTools = tools
-                    try? writeToDisk(servers[idx])
+                guard let idx = self.servers.firstIndex(where: { $0.slug == slug }) else { continue }
+                if !Self.tools(tools, equal: self.servers[idx].cachedTools) {
+                    self.servers[idx].cachedTools = tools
+                    try? self.writeToDisk(self.servers[idx])
                     anyChange = true
                 }
             }
+            if anyChange { self.didReload?() }
+            if let c = completion { DispatchQueue.main.async(execute: c) }
         }
-
-        if anyChange { didReload?() }
-        return anyChange
     }
 
     private func upsert(_ record: MCPServerRecord) {
@@ -324,30 +348,68 @@ final class MCPRegistry {
             ))
             return
         }
-        guard let url = URL(string: server.url) else {
+        guard let client = self.client(for: server) else {
             completion(Self.functionMessage(
                 name: functionCall.name,
                 payload: ["status": "error", "error": "Invalid server URL \(server.url)"]
             ))
             return
         }
+        // Cached client: `ensureInitialized` is a no-op after the first
+        // successful handshake, so subsequent tool calls skip the extra
+        // round-trip entirely. If the server has since invalidated the
+        // session (HTTP 404 per MCP spec), `callOnce` retries once after
+        // forcing a fresh handshake.
+        callOnce(server: server,
+                 client: client,
+                 functionCall: functionCall,
+                 tool: tool,
+                 allowSessionRetry: true,
+                 completion: completion)
+    }
 
-        let client = MCPClient(url: url, bearerToken: Self.readToken(slug: server.slug))
-        // MCP requires an initialize handshake before tools/call; we re-do
-        // it on every call because session state isn't shared across
-        // client instances. Cheap relative to the actual tool work.
-        client.initialize { [weak client] initResult in
+    /// Run one initialize+callTool pair. If the call fails with a
+    /// session-expired signal and `allowSessionRetry` is true, invalidates
+    /// the cached session and retries once. Beyond that, surfaces the error
+    /// to the model.
+    private func callOnce(server: MCPServerRecord,
+                          client: MCPClient,
+                          functionCall: FunctionCallStruct,
+                          tool: String,
+                          allowSessionRetry: Bool,
+                          completion: @escaping (MessageStruct) -> Void) {
+        client.ensureInitialized { [weak self, weak client] initResult in
             guard let client = client else { return }
             if case .failure(let e) = initResult {
+                if allowSessionRetry, self?.isSessionExpired(e) == true {
+                    client.invalidateSession()
+                    self?.callOnce(server: server,
+                                   client: client,
+                                   functionCall: functionCall,
+                                   tool: tool,
+                                   allowSessionRetry: false,
+                                   completion: completion)
+                    return
+                }
                 completion(Self.functionMessage(
                     name: functionCall.name,
                     payload: ["status": "error", "error": e.localizedDescription]
                 ))
                 return
             }
-            client.callTool(name: tool, arguments: functionCall.arguments) { callResult in
+            client.callTool(name: tool, arguments: functionCall.arguments) { [weak self] callResult in
                 switch callResult {
                 case .failure(let e):
+                    if allowSessionRetry, self?.isSessionExpired(e) == true {
+                        client.invalidateSession()
+                        self?.callOnce(server: server,
+                                       client: client,
+                                       functionCall: functionCall,
+                                       tool: tool,
+                                       allowSessionRetry: false,
+                                       completion: completion)
+                        return
+                    }
                     completion(Self.functionMessage(
                         name: functionCall.name,
                         payload: ["status": "error", "error": e.localizedDescription]
@@ -395,9 +457,27 @@ final class MCPRegistry {
         return (server, tool)
     }
 
-    /// Stable lowercase slug derived from the URL host. Disambiguates if the
-    /// path is non-trivial so multiple endpoints on the same host don't
-    /// collide.
+    /// Pick a slug for a newly-installed URL. Reuses the existing slug on a
+    /// same-URL reinstall, returns the base slug if it's free, and otherwise
+    /// appends a stable 6-char URL hash so two distinct URLs that happen to
+    /// derive the same base slug (e.g. `mcp.foo/x` and `mcp-foo/x` both
+    /// collapse to `mcp_foo_x`) cannot overwrite each other's records.
+    func resolveSlug(forURL urlString: String, parsedURL: URL) -> String {
+        let base = Self.slug(from: parsedURL)
+        let snapshot = queue.sync { servers }
+        if let existing = snapshot.first(where: { $0.url == urlString }) {
+            return existing.slug
+        }
+        if !snapshot.contains(where: { $0.slug == base }) {
+            return base
+        }
+        return "\(base)_\(Self.shortHash(of: urlString))"
+    }
+
+    /// Lowercase base slug derived from the URL host + path. Non-alphanumeric
+    /// characters collapse to underscore; two distinct URLs CAN produce the
+    /// same base slug, which is why `resolveSlug` layers a URL-hash suffix on
+    /// top of this when needed.
     static func slug(from url: URL) -> String {
         let host = url.host ?? "server"
         let pathPart = url.path
@@ -409,6 +489,60 @@ final class MCPRegistry {
             let ch = Character(s)
             return allowed.contains(ch) ? ch : "_"
         }).trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+    }
+
+    /// First 6 hex chars of SHA256(string). Enough entropy (~16M) that a
+    /// collision between two real-world MCP URLs is effectively impossible
+    /// while keeping the suffix short enough to stay inside typical
+    /// function-name length limits.
+    static func shortHash(of string: String) -> String {
+        let digest = SHA256.hash(data: Data(string.utf8))
+        return digest.prefix(3).map { String(format: "%02x", $0) }.joined()
+    }
+
+    // MARK: - Client cache
+
+    /// Returns the cached client for `server`, lazily creating one on first
+    /// use. The bearer token is refreshed from Keychain on every access so a
+    /// freshly-edited token applies on the very next call without dropping
+    /// the live session.
+    private func client(for server: MCPServerRecord) -> MCPClient? {
+        guard let url = URL(string: server.url) else { return nil }
+        clientsLock.lock(); defer { clientsLock.unlock() }
+        if let existing = clients[server.slug], existing.url == url {
+            existing.bearerToken = Self.readToken(slug: server.slug)
+            return existing
+        }
+        let fresh = MCPClient(url: url, bearerToken: Self.readToken(slug: server.slug))
+        clients[server.slug] = fresh
+        return fresh
+    }
+
+    /// Drop the cached client (and its session) for `slug`. Called on
+    /// uninstall and on disable so a stale session can't outlive the record.
+    private func dropClient(slug: String) {
+        clientsLock.lock(); defer { clientsLock.unlock() }
+        clients.removeValue(forKey: slug)
+    }
+
+    /// True if the error indicates the server no longer accepts the cached
+    /// session id. Per MCP spec, that's HTTP 404 on a request that carried a
+    /// `Mcp-Session-Id` header.
+    private func isSessionExpired(_ error: Error) -> Bool {
+        guard let mcpError = error as? MCPClientError else { return false }
+        if case .http(let status, _) = mcpError, status == 404 { return true }
+        return false
+    }
+
+    /// Invalidate the cached client's session on a session-expired signal so
+    /// the next call re-handshakes from scratch. Other errors are left alone
+    /// — they don't necessarily mean the session is dead.
+    private func handleSessionError(_ error: Error, slug: String) {
+        guard isSessionExpired(error) else { return }
+        clientsLock.lock()
+        let cached = clients[slug]
+        clientsLock.unlock()
+        cached?.invalidateSession()
     }
 
     private static func tools(_ a: [MCPTool], equal b: [MCPTool]) -> Bool {

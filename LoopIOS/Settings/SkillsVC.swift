@@ -217,10 +217,7 @@ extension SkillsVC: UITableViewDataSource, UITableViewDelegate {
             self?.refreshServers()
         })
         sheet.addAction(UIAlertAction(title: "Refresh tools", style: .default) { [weak self] _ in
-            DispatchQueue.global(qos: .userInitiated).async {
-                MCPRegistry.shared.reload()
-                DispatchQueue.main.async { self?.refreshServers() }
-            }
+            MCPRegistry.shared.reload { self?.refreshServers() }
         })
         sheet.addAction(UIAlertAction(title: "Edit token…", style: .default) { [weak self] _ in
             self?.presentEditToken(for: server)

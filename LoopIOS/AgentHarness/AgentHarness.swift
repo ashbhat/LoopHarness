@@ -353,12 +353,10 @@ final class AgentHarness {
         DynamicSkillRegistry.shared.reload()
         // And remote MCP servers — re-fetch tools/list off the network so
         // catalog changes on the server side show up without a relaunch.
-        // The call hops onto its own queue and a stale catalog just lingers
-        // for one more turn if the network is slow, matching the dynamic
-        // registry's "next turn at the latest" contract.
-        DispatchQueue.global(qos: .userInitiated).async {
-            MCPRegistry.shared.reload()
-        }
+        // `reload()` is fire-and-forget: the current turn always uses the
+        // cached catalog, and any updates land via `didReload` in time for
+        // the next turn, matching the dynamic registry's contract.
+        MCPRegistry.shared.reload()
 
         // Two reasons to take the offline (Apple Foundation) path:
         //   1. The device is offline — the cloud is unreachable, so no other

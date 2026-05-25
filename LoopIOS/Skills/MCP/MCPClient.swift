@@ -152,10 +152,70 @@ final class MCPClient {
     /// echoed back on subsequent requests. Some servers require it; others
     /// don't issue one. We round-trip whatever they hand us.
     var sessionId: String?
+    /// Per-request URLSession timeout. Defaults to 30s (long enough for an
+    /// actual `tools/call`); callers doing background catalog refreshes pass
+    /// a much shorter value so a single hung server can't pin the request.
+    let timeoutInterval: TimeInterval
 
-    init(url: URL, bearerToken: String? = nil) {
+    /// True once `initialize` has completed successfully for this client. The
+    /// registry caches one client per server slug so the handshake fires once
+    /// per session instead of once per tool call.
+    private var initialized = false
+    private var initializing = false
+    private var pendingInit: [(Result<Void, Error>) -> Void] = []
+    private let initLock = NSLock()
+
+    init(url: URL, bearerToken: String? = nil, timeoutInterval: TimeInterval = 30) {
         self.url = url
         self.bearerToken = bearerToken
+        self.timeoutInterval = timeoutInterval
+    }
+
+    /// Run `initialize` if it hasn't already succeeded for this client;
+    /// otherwise complete synchronously. Concurrent callers coalesce — only
+    /// one handshake fires and every waiter gets the same result.
+    func ensureInitialized(completion: @escaping (Result<Void, Error>) -> Void) {
+        initLock.lock()
+        if initialized {
+            initLock.unlock()
+            completion(.success(()))
+            return
+        }
+        pendingInit.append(completion)
+        if initializing {
+            initLock.unlock()
+            return
+        }
+        initializing = true
+        initLock.unlock()
+
+        initialize { [weak self] result in
+            guard let self = self else { return }
+            self.initLock.lock()
+            let waiting = self.pendingInit
+            self.pendingInit = []
+            self.initializing = false
+            if case .success = result { self.initialized = true }
+            self.initLock.unlock()
+
+            let mapped: Result<Void, Error>
+            switch result {
+            case .success:        mapped = .success(())
+            case .failure(let e): mapped = .failure(e)
+            }
+            for c in waiting { c(mapped) }
+        }
+    }
+
+    /// Drop the cached session so the next `ensureInitialized` re-handshakes.
+    /// Per the MCP spec, servers return HTTP 404 once a session id is no
+    /// longer valid — the registry calls this on that signal so a subsequent
+    /// tool call recovers instead of looping on the dead session.
+    func invalidateSession() {
+        initLock.lock()
+        initialized = false
+        sessionId = nil
+        initLock.unlock()
     }
 
     // MARK: - Public RPC surface
@@ -193,9 +253,13 @@ final class MCPClient {
         }
     }
 
-    /// Fetch the catalog of tools the server exposes.
-    func listTools(completion: @escaping (Result<[MCPTool], Error>) -> Void) {
-        send(method: "tools/list", params: [:], isNotification: false) { result in
+    /// Fetch the catalog of tools the server exposes. `timeout` overrides the
+    /// client's default per-request timeout — the registry's background
+    /// catalog refresh passes a short value so a hung server fails fast
+    /// without affecting in-flight tool calls on the same shared client.
+    func listTools(timeout: TimeInterval? = nil,
+                   completion: @escaping (Result<[MCPTool], Error>) -> Void) {
+        send(method: "tools/list", params: [:], isNotification: false, timeoutOverride: timeout) { result in
             switch result {
             case .failure(let e): completion(.failure(e))
             case .success(let payload):
@@ -242,9 +306,12 @@ final class MCPClient {
     /// Send one JSON-RPC message. Notifications get no id and don't wait for
     /// a response payload; regular calls block until a matching response
     /// (matched by `id`) arrives over the chosen Streamable-HTTP framing.
+    /// `timeoutOverride` lets a specific call cap its URLSession timeout
+    /// below the client's default (used by the catalog-refresh path).
     private func send(method: String,
                       params: [String: Any],
                       isNotification: Bool,
+                      timeoutOverride: TimeInterval? = nil,
                       completion: @escaping (Result<[String: Any], Error>) -> Void) {
 
         let id = isNotification ? nil : Int.random(in: 1...Int.max)
@@ -260,7 +327,7 @@ final class MCPClient {
             return
         }
 
-        var request = URLRequest(url: url, timeoutInterval: 30)
+        var request = URLRequest(url: url, timeoutInterval: timeoutOverride ?? timeoutInterval)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         // Streamable HTTP: accept either a JSON one-shot or an SSE stream.
