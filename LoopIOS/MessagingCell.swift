@@ -1052,10 +1052,8 @@ class MessagingCell: UITableViewCell {
         codeTV.textContainer.lineFragmentPadding = 0
         let codeFont = UIFont.monospacedSystemFont(
             ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize - 1, weight: .regular)
-        codeTV.attributedText = NSAttributedString(string: block.code, attributes: [
-            .font: codeFont,
-            .foregroundColor: UIColor.label,
-        ])
+        codeTV.attributedText = CodeSyntaxHighlighter.highlight(
+            block.code, language: block.language, font: codeFont)
         container.addSubview(codeTV)
 
         NSLayoutConstraint.activate([

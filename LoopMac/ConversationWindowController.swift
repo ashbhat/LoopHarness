@@ -1667,10 +1667,9 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
         let codeFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         let tv = ChatLinkTextView.makeBubbleTextView(maxTextWidth: .greatestFiniteMagnitude)
         tv.textContainerInset = NSSize(width: 12, height: 12)
-        tv.textStorage?.setAttributedString(NSAttributedString(string: block.code, attributes: [
-            .font: codeFont,
-            .foregroundColor: NSColor.labelColor,
-        ]))
+        tv.textStorage?.setAttributedString(
+            CodeSyntaxHighlighter.highlight(block.code, language: block.language, font: codeFont)
+        )
         container.addSubview(tv)
         tv.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
