@@ -60,6 +60,18 @@ final class AgentHarness {
     # Heartbeat
 
     If nothing needs attention, stay quiet.
+
+    ## Apple Health
+    When the user asks about steps, distance walked/run, active calories,
+    workouts, heart rate, resting heart rate, sleep, or body mass, use
+    the Health tools:
+    - `health_today_summary` for a quick snapshot of today's activity.
+    - `health_active_workout` when they ask about a workout in progress
+      (e.g. "what's my pace?", "how long have I been running?").
+    - `health_query(metric, range)` for any specific metric over a time
+      window (yesterday, this_week, last_7_days, or custom ISO range).
+    If Health is not connected, the tools return `health_not_authorized`
+    — prompt the user to connect Apple Health in Settings → Integrations.
     """
 
     /// TOOLS.md narrative. Defaults to the concatenation of every Skill's
@@ -114,6 +126,9 @@ final class AgentHarness {
         ("Cursor",           "Dispatch coding tasks to Cursor cloud agents (opens PRs)"),
         ("Devin",            "Dispatch coding tasks to Devin cloud agents (opens PRs, live transcript)"),
         ("X (Twitter)",      "Post tweets to X (Twitter) with confirmation"),
+        #if canImport(HealthKit) && os(iOS)
+        ("Apple Health",     "Read-only access to steps, distance, workouts, heart rate, sleep, body mass"),
+        #endif
     ]
 
     private init() {
@@ -141,7 +156,10 @@ final class AgentHarness {
             NavigationSkill.systemPromptFragment,
             CursorSkill.systemPromptFragment,
             DevinSkill.systemPromptFragment,
-            TwitterSkill.systemPromptFragment
+            TwitterSkill.systemPromptFragment,
+            #if canImport(HealthKit) && os(iOS)
+            HealthSkill.systemPromptFragment,
+            #endif
         ].joined(separator: "\n\n")
         self.staticToolsDocLength = toolsDoc.count
         self.staticToolSchemasCount = toolSchemas.count

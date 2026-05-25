@@ -113,6 +113,8 @@
 		<string>fetch</string>
 		<string>processing</string>
 	</array>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Loop reads your Health data (steps, distance, workouts, heart rate, sleep) so the assistant can answer questions about your activity and wellness. Your data stays on device and is never sent to analytics.</string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.bhat.intel.scheduler.prefetch</string>

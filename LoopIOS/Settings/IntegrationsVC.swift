@@ -17,6 +17,9 @@
 
 import UIKit
 import EventKit
+#if canImport(HealthKit)
+import HealthKit
+#endif
 
 final class IntegrationsVC: UIViewController {
 
@@ -122,6 +125,7 @@ final class IntegrationsVC: UIViewController {
             githubIntegration(),
             devinIntegration(),
             twitterIntegration(),
+            healthIntegration(),
         ]
 
         tableView.reloadData()
@@ -392,6 +396,87 @@ final class IntegrationsVC: UIViewController {
             nav.setViewControllers(stack, animated: true)
         }
     }
+
+    // MARK: - Apple Health
+
+    private func healthIntegration() -> Integration {
+        #if canImport(HealthKit) && os(iOS)
+        let status = HealthKitManager.shared.currentAuthorizationStatus
+        let integrationStatus: Integration.Status
+        let subtitle: String
+        switch status {
+        case .authorized:
+            integrationStatus = .connected
+            subtitle = "Connected \u{00B7} read-only access to steps, workouts, heart rate, sleep"
+        case .denied:
+            integrationStatus = .denied
+            subtitle = "Health access blocked \u{2014} enable in iOS Settings"
+        case .notDetermined:
+            integrationStatus = .notConnected
+            subtitle = "Tap to connect Apple Health (read-only)"
+        case .unavailable:
+            integrationStatus = .comingSoon
+            subtitle = "HealthKit is not available on this device"
+        }
+        return Integration(
+            title: "Apple Health",
+            subtitle: subtitle,
+            icon: "heart.fill",
+            tint: .systemPink,
+            status: integrationStatus,
+            handler: status == .unavailable ? nil : { vc in vc.handleHealthTap() }
+        )
+        #else
+        return Integration(
+            title: "Apple Health",
+            subtitle: "Not available on this platform",
+            icon: "heart.fill",
+            tint: .systemPink,
+            status: .comingSoon,
+            handler: nil
+        )
+        #endif
+    }
+
+    #if canImport(HealthKit) && os(iOS)
+    private func handleHealthTap() {
+        let status = HealthKitManager.shared.currentAuthorizationStatus
+        switch status {
+        case .authorized:
+            let alert = UIAlertController(
+                title: "Apple Health connected",
+                message: "Loop can read your steps, distance, workouts, heart rate, sleep, and body mass. To disconnect, open iOS Settings \u{2192} Privacy & Security \u{2192} Health \u{2192} Loop and disable access.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            })
+            alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+            present(alert, animated: true)
+        case .denied:
+            let alert = UIAlertController(
+                title: "Health access blocked",
+                message: "Loop's Health access was previously denied. Re-enable Loop in iOS Settings \u{2192} Privacy & Security \u{2192} Health.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            })
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            present(alert, animated: true)
+        case .notDetermined:
+            HealthKitManager.shared.requestAuthorization { [weak self] _, _ in
+                self?.rebuildIntegrations()
+            }
+        case .unavailable:
+            break
+        }
+    }
+    #endif
 
     private func handleCalendarTap() {
         switch CalendarSkill.shared.currentAuthorizationStatus {
