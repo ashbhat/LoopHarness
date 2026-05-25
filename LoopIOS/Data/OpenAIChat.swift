@@ -193,6 +193,13 @@ final class OpenAIChat {
                     // OpenAI tolerates a null content alongside tool_calls; we
                     // include any reasoning text when the model provided some.
                     if !m.content.isEmpty { out["content"] = m.content }
+                    // Kimi K2.6 returns `reasoning_content` on assistant turns
+                    // when thinking is enabled. The API requires the field to
+                    // be present when the message is replayed in history;
+                    // omitting it triggers "reasoning_content is missing".
+                    if let rc = m.reasoningContent {
+                        out["reasoning_content"] = rc
+                    }
                     return out
                 }
                 // Legacy fallback — at least one call has no id. Replay all
@@ -214,6 +221,11 @@ final class OpenAIChat {
             // OpenAI rejects them as unrecognized request arguments.
             var out: [String: Any] = ["role": m.role]
             if let name = m.name { out["name"] = name }
+            // Replay reasoning_content on plain assistant turns too — Kimi
+            // validates its presence whenever thinking was active.
+            if m.role == "assistant", let rc = m.reasoningContent {
+                out["reasoning_content"] = rc
+            }
 
             if let f = m.fileAttachment, f.status == .ready,
                f.kind == .image,
