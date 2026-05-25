@@ -114,14 +114,10 @@ final class IntegrationsVC: UIViewController {
                 handler: { vc in vc.handleCalendarTap() }
             ),
             notionIntegration(),
-            Integration(
-                title: "Gmail",
-                subtitle: "Coming soon · OAuth wiring in progress",
-                icon: "envelope",
-                tint: .systemRed,
-                status: .comingSoon,
-                handler: nil
-            ),
+            // Gmail intentionally omitted until OAuth ships — surfacing a
+            // disabled "Coming soon" row reads as a dead end and pushes the
+            // working integrations down the list. Restore once the OAuth
+            // flow lands.
             slackIntegration(),
             githubIntegration(),
             devinIntegration(),

@@ -88,6 +88,12 @@ class MainVC: MessagingVC {
     @objc func presentAgentLargeView() {
         let vc = AgentLargeVC()
         vc.modalPresentationStyle = .fullScreen
+        // MainVC inherits from MessagingVC, which owns the actual MessageBox
+        // + voice pipeline — hand `self` to the agent view so its
+        // press-and-hold pill drives the same recording path the in-chat mic
+        // button uses, without hoisting STT into a shared coordinator (Phase
+        // B work, intentionally out of scope here).
+        vc.voiceDelegate = self
         let delegate = AvatarPopTransitionDelegate(sourceAvatar: avatar) { presented in
             (presented as? AgentLargeVC)?.agentView.avatar
         }

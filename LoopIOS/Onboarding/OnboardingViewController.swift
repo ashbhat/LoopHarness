@@ -864,3 +864,19 @@ final class ClosureButton: UIButton {
 
     @objc private func invoke() { actionClosure() }
 }
+
+/// UITapGestureRecognizer counterpart of `ClosureButton`, used by the
+/// mock-Settings rows in the action-button walkthrough so taps on the
+/// "Action Button" row and "Choose a Shortcut" pill route to the same
+/// deep-link handler as the explicit "Open Settings" CTA. Name-spaced
+/// with `Modal*` to avoid colliding with the equivalent helper in
+/// `OnboardingCardView.swift`.
+private final class ModalClosureTapRecognizer: UITapGestureRecognizer {
+    private let actionClosure: () -> Void
+    init(action: @escaping () -> Void) {
+        self.actionClosure = action
+        super.init(target: nil, action: nil)
+        addTarget(self, action: #selector(invoke))
+    }
+    @objc private func invoke() { actionClosure() }
+}

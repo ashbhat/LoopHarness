@@ -308,7 +308,9 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
     
     
     // Mute state — synced across reinstalls/devices via iCloudKVSDefaults.
-    private var isMuted: Bool {
+    // Internal (not private) so the expanded AgentView's speaker button can
+    // mirror the nav-bar toggle via the AgentLargeViewVoiceDelegate path.
+    var isMuted: Bool {
         get {
             return iCloudKVSDefaults.shared.bool(forKey: "audioMuted")
         }
@@ -803,8 +805,48 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
     func newMessageSent() {
 
     }
-    
-    
+
+
+}
+
+extension MessagingVC: AgentLargeViewVoiceDelegate {
+    /// Begin recording when the expanded AgentView's press-and-hold pill is
+    /// touched. Reuses the same MessageBox path the in-chat mic button takes,
+    /// so transcription, partial-results, and TTS-yield behavior are
+    /// identical whether the user composes from chat or from the orb.
+    func agentLargeViewDidBeginVoice() {
+        // Defensive: if a prior recording is somehow still in flight (rapid
+        // gesture re-fire, view re-entry mid-record), drop it before starting
+        // a fresh capture so we never have two active sessions.
+        if messageBox.currentState == .recording {
+            messageBox.stopVoiceRecording()
+        }
+        messageBox.startVoiceRecording()
+    }
+
+    /// Release — send the captured audio for transcription + dispatch.
+    func agentLargeViewDidEndVoice() {
+        messageBox.sendCurrentRecording()
+    }
+
+    /// Gesture interrupted — drop the buffer without sending. Matches the
+    /// expectation that a half-pressed pill (interrupted by a system dialog
+    /// or a sheet dismiss) never accidentally posts to the model.
+    func agentLargeViewDidCancelVoice() {
+        messageBox.stopVoiceRecording()
+    }
+
+    /// Mirror the nav-bar speaker button's state.
+    func agentLargeViewIsMuted() -> Bool { isMuted }
+
+    /// Flip the persisted mute state and stop any in-flight speech if the
+    /// user just muted. The `isMuted` setter already refreshes the nav-bar
+    /// icon via `updateMuteButtonAppearance`, so this keeps both surfaces
+    /// in sync from a single source of truth.
+    func agentLargeViewDidToggleMute() {
+        isMuted.toggle()
+        if isMuted { stopSpeaking() }
+    }
 }
 
 extension MessagingVC: MessageBoxDelegate {
@@ -1061,6 +1103,12 @@ extension MessagingVC: MessageBoxDelegate {
             conversationManager.addMessage(message, to: conversation)
             currentConversationEntity = conversationManager.currentConversation
             self.messages.append(message)
+            // Publish the assistant turn to the activity log so the expanded
+            // AgentView can render it as a readable transcript below the orb.
+            // We publish here (not inside playMessageSynthesizer) because TTS
+            // is skippable — when the user has voice muted, the orb should
+            // still surface the text.
+            AgentActivityLog.shared.setAssistantTranscript(message.content)
             VoiceLoopCoordinator.shared.publishAcknowledgePulse()
             self.playMessageSynthesizer(message: message)
             self.messageIdToAnimate = message.id
@@ -1084,15 +1132,13 @@ extension MessagingVC: MessageBoxDelegate {
             return
         }
 
-        // Assistant emitted ≥1 tool call(s). Update the shimmer + activity log
-        // for the first call so the UI flips before any tool starts running,
-        // persist the assistant turn so the model can see its own call list
-        // on the next round-trip, then fan out every call before issuing one
-        // follow-up chat with all the results.
+        // Assistant emitted ≥1 tool call(s). Update the shimmer for the first
+        // call so the UI flips before any tool starts running, then hand off
+        // to dispatchAllCalls which logs each call individually as it begins
+        // (so the expanded AgentView caption tracks every parallel tool, not
+        // just the first one in the batch).
         if let firstCall = message.functions.first {
-            let status = self.statusText(for: firstCall)
-            self.ai_state = .Thinking(text: status)
-            AgentActivityLog.shared.log(.toolCall, status, detail: firstCall.name)
+            self.ai_state = .Thinking(text: self.statusText(for: firstCall))
         }
         self.messages.append(message)
         DispatchQueue.main.async { self.tableView.reloadData() }
@@ -1122,6 +1168,17 @@ extension MessagingVC: MessageBoxDelegate {
         }
 
         for (index, call) in calls.enumerated() {
+            // Stamp a key for the activity log so the expanded AgentView can
+            // pair toolCall→toolResult and render a live "running N tools"
+            // caption while the batch is in flight. Provider-issued ids are
+            // preferred when present; otherwise we synthesize one purely for
+            // the log (the wire layer falls back to its own nil-handling).
+            let activityKey = call.callId ?? UUID().uuidString
+            AgentActivityLog.shared.beginToolCall(
+                callId: activityKey,
+                summary: self.statusText(for: call),
+                detail: call.name
+            )
             self.dispatchCall(call) { [weak self] result in
                 guard let self = self else { return }
                 var r = result
@@ -1133,6 +1190,10 @@ extension MessagingVC: MessageBoxDelegate {
                 if r.callId == nil { r.callId = call.callId }
                 if r.name == nil   { r.name   = call.name }
                 DispatchQueue.main.async {
+                    AgentActivityLog.shared.endToolCall(
+                        callId: activityKey,
+                        resultSummary: "finished \(call.name)"
+                    )
                     resultBuffer[index] = r
                     pendingCount -= 1
                     if pendingCount == 0 {
@@ -1723,6 +1784,11 @@ extension MessagingVC {
     @objc func rightBarButtonTapped() {
         // Create a new conversation
         createNewConversation()
+        // Reset the agent activity surface — the expanded AgentView keys
+        // off this for its transcript + active-tool caption, and bleeding
+        // the previous conversation's last reply into a fresh chat reads
+        // as broken state.
+        AgentActivityLog.shared.clear()
         
         let currentDate = Date()
         let dateFormatter = DateFormatter()
