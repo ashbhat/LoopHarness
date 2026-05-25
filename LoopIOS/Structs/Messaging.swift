@@ -483,6 +483,9 @@ var tools: [[String: Any]] = {
     all += CursorSkill.tools
     all += DevinSkill.tools
     all += TwitterSkill.tools
+    #if canImport(HealthKit) && os(iOS)
+    all += HealthSkill.tools
+    #endif
     // Dynamic, user-authored skills get appended in AgentHarness at every
     // chat turn so newly hot-loaded skills become visible without restart.
     return all

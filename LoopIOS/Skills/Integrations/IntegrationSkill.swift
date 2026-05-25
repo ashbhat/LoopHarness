@@ -21,6 +21,9 @@
 
 import Foundation
 import EventKit
+#if canImport(HealthKit)
+import HealthKit
+#endif
 
 /// Posted by the skill when the model invokes `open_integration_settings` so
 /// the platform host can present the right surface.
@@ -45,7 +48,7 @@ final class IntegrationSkill {
 
     static let systemPromptFragment: String = """
 You can manage the user's integrations and API keys directly:
-- list_integrations: enumerate the integrations Loop knows about (Google Calendar via EventKit, Notion, Gmail, Slack) and their current connection state. Notion and Slack are token-backed (ntn_… integration token and xoxp- user token respectively, both stored in the Keychain) — status flips to "connected" once the user pastes the relevant key.
+- list_integrations: enumerate the integrations Loop knows about (Google Calendar via EventKit, Notion, Gmail, Slack, Apple Health) and their current connection state. Notion and Slack are token-backed (ntn_… integration token and xoxp- user token respectively, both stored in the Keychain) — status flips to "connected" once the user pastes the relevant key. Apple Health is OS-permission-backed (like Calendar).
 - connect_integration: kick off the connect flow for a named integration. For Google Calendar this triggers the OS permission prompt when status is undetermined; if access was previously denied, the tool returns a hint telling you to call open_integration_settings with target="calendar_privacy". For Slack, this returns a `needs_api_key` payload with instructions to walk the user through minting an xoxp- token and pasting it in Settings → Keys → Slack User Token.
 - open_integration_settings: surfaces the in-app Integrations panel (target="in_app", default) or the system Privacy pane (target="calendar_privacy"). Use this when the user says "open integrations" / "let me see my settings".
 - list_api_keys: reports which API keys are currently set (Deepgram, ElevenLabs, OpenAI, Exa, Cursor, Obsidian). Values are never returned — only whether each is present.
@@ -82,7 +85,7 @@ Tips:
                     "properties": [
                         "name": [
                             "type": "string",
-                            "description": "Integration identifier. One of: calendar, notion, gmail, slack."
+                            "description": "Integration identifier. One of: calendar, notion, gmail, slack, health."
                         ]
                     ],
                     "required": ["name"]
@@ -252,7 +255,24 @@ Tips:
                 ? "Paste a personal xoxp- token in Settings → Keys → Slack User Token. The user can mint one at api.slack.com/apps with the scopes listed in Specs/3. Integrations Spec.md."
                 : "Connected via personal user token. Slack tools are live."
         ]
-        return [calendar, notion, gmail, slack]
+        #if canImport(HealthKit) && os(iOS)
+        let healthStatus = HealthKitManager.shared.currentAuthorizationStatus
+        let health: [String: Any] = [
+            "name": "health",
+            "display_name": "Apple Health",
+            "status": healthStatus.rawValue,
+            "hint": healthHint(healthStatus)
+        ]
+        return [calendar, notion, gmail, slack, health]
+        #else
+        let health: [String: Any] = [
+            "name": "health",
+            "display_name": "Apple Health",
+            "status": "unavailable",
+            "hint": "HealthKit is not available on this platform."
+        ]
+        return [calendar, notion, gmail, slack, health]
+        #endif
     }
 
     private static func calendarStatusString(_ status: EKAuthorizationStatus) -> String {
@@ -276,6 +296,21 @@ Tips:
             return "Status unknown."
         }
     }
+
+    #if canImport(HealthKit) && os(iOS)
+    private static func healthHint(_ status: HealthKitManager.AuthStatus) -> String {
+        switch status {
+        case .authorized:
+            return "Apple Health is connected. Health query tools (health_today_summary, health_active_workout, health_query) are live."
+        case .denied:
+            return "Health access was previously denied. Tell the user to re-enable Loop in iOS Settings → Privacy & Security → Health."
+        case .notDetermined:
+            return "No permission decision yet. Call connect_integration with name=\"health\" to surface the Health permission prompt."
+        case .unavailable:
+            return "HealthKit is not available on this device."
+        }
+    }
+    #endif
 
     // MARK: - connect_integration
 
@@ -352,11 +387,48 @@ Tips:
                 ]))
             }
 
+        case "health", "apple_health", "apple health", "healthkit":
+            #if canImport(HealthKit) && os(iOS)
+            let status = HealthKitManager.shared.currentAuthorizationStatus
+            switch status {
+            case .authorized:
+                completion(Self.functionMessage(name: toolName, payload: [
+                    "name": "health",
+                    "status": "already_connected"
+                ]))
+            case .denied:
+                completion(Self.functionMessage(name: toolName, payload: [
+                    "name": "health",
+                    "status": "needs_system_settings",
+                    "next_action": "Tell the user to re-enable Loop in iOS Settings → Privacy & Security → Health."
+                ]))
+            case .notDetermined:
+                HealthKitManager.shared.requestAuthorization { granted, _ in
+                    completion(Self.functionMessage(name: toolName, payload: [
+                        "name": "health",
+                        "status": granted ? "connected" : "denied"
+                    ]))
+                }
+            case .unavailable:
+                completion(Self.functionMessage(name: toolName, payload: [
+                    "name": "health",
+                    "status": "unavailable",
+                    "message": "HealthKit is not available on this device."
+                ]))
+            }
+            #else
+            completion(Self.functionMessage(name: toolName, payload: [
+                "name": "health",
+                "status": "unavailable",
+                "message": "HealthKit is not available on this platform."
+            ]))
+            #endif
+
         default:
             completion(Self.functionMessage(name: toolName, payload: [
                 "error": "unknown_integration",
                 "name": which,
-                "hint": "Known integrations: calendar, notion, gmail, slack."
+                "hint": "Known integrations: calendar, notion, gmail, slack, health."
             ]))
         }
     }

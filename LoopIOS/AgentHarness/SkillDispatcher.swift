@@ -128,6 +128,11 @@ final class SkillDispatcher {
         if TwitterSkill.shared.handles(functionName: call.name) {
             TwitterSkill.shared.handle(functionCall: call, completion: completion); return
         }
+        #if canImport(HealthKit) && os(iOS)
+        if HealthSkill.shared.handles(functionName: call.name) {
+            HealthSkill.shared.handle(functionCall: call, completion: completion); return
+        }
+        #endif
 
         // Runtime-registered skills (Mac-only). Checked under the lock so a
         // concurrent register() can't tear the iteration.

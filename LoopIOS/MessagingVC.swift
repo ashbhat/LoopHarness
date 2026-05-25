@@ -1067,6 +1067,9 @@ extension MessagingVC: MessageBoxDelegate {
         if let s = DevinSkill.shared.statusText(for: call) { return s }
         if let s = NavigationSkill.shared.statusText(for: call) { return s }
         if let s = TwitterSkill.shared.statusText(for: call) { return s }
+        #if canImport(HealthKit) && os(iOS)
+        if let s = HealthSkill.shared.statusText(for: call) { return s }
+        #endif
         if let s = DynamicSkillRegistry.shared.statusText(for: call) { return s }
 
         switch call.name {
