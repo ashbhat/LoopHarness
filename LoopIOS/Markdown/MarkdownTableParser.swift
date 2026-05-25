@@ -23,9 +23,15 @@ public struct MarkdownTable: Equatable {
     public var columnCount: Int { headers.count }
 }
 
+public struct MarkdownCodeBlock: Equatable {
+    public let language: String?
+    public let code: String
+}
+
 public enum MarkdownSegment: Equatable {
     case text(String)
     case table(MarkdownTable)
+    case codeBlock(MarkdownCodeBlock)
 }
 
 public enum MarkdownSegmenter {
@@ -35,6 +41,19 @@ public enum MarkdownSegmenter {
     public static func containsTable(in markdown: String) -> Bool {
         for segment in segments(from: markdown) {
             if case .table = segment { return true }
+        }
+        return false
+    }
+
+    /// True when the text contains a table or a fenced code block —
+    /// anything that should be routed through the rich-content stack
+    /// instead of the single-text-view fast path.
+    public static func containsRichContent(in markdown: String) -> Bool {
+        for segment in segments(from: markdown) {
+            switch segment {
+            case .table, .codeBlock: return true
+            case .text: continue
+            }
         }
         return false
     }
@@ -73,14 +92,22 @@ public enum MarkdownSegmenter {
             // the whole fence into the text buffer so the parser never
             // treats lines inside it as a table candidate.
             if isFenceLine(lines[i]) {
-                textBuffer.append(lines[i])
+                let openingLine = lines[i]
+                let language = parseFenceLanguage(openingLine)
+                var codeLines: [String] = []
                 i += 1
                 while i < lines.count {
-                    textBuffer.append(lines[i])
-                    let wasFence = isFenceLine(lines[i])
+                    if isFenceLine(lines[i]) {
+                        i += 1
+                        break
+                    }
+                    codeLines.append(lines[i])
                     i += 1
-                    if wasFence { break }
                 }
+                flushText()
+                let block = MarkdownCodeBlock(language: language,
+                                              code: codeLines.joined(separator: "\n"))
+                result.append(.codeBlock(block))
                 continue
             }
 
@@ -102,6 +129,16 @@ public enum MarkdownSegmenter {
     private static func isFenceLine(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         return trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~")
+    }
+
+    /// Extracts the optional language hint after the opening fence
+    /// (e.g. "swift" from `` ```swift ``). Returns nil when absent.
+    private static func parseFenceLanguage(_ line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let fence = trimmed.hasPrefix("```") ? "```" : "~~~"
+        let rest = trimmed.dropFirst(fence.count)
+                          .trimmingCharacters(in: .whitespaces)
+        return rest.isEmpty ? nil : rest
     }
 
     // MARK: - Table parsing

@@ -1145,7 +1145,7 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
             label.textColor = .white
             label.stringValue = text
             contentView = label
-        } else if MarkdownSegmenter.containsTable(in: text) {
+        } else if MarkdownSegmenter.containsRichContent(in: text) {
             contentView = makeAssistantRichContentView(text: text, maxWidth: 380 - 24)
         } else {
             let tv = ChatLinkTextView.makeBubbleTextView(maxTextWidth: 380 - 24)
@@ -1457,6 +1457,29 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
         ]
         let attributed = NSMutableAttributedString(string: text, attributes: baseAttrs)
 
+        // Fenced code blocks: ```lang\n…\n```. Strip the fence markers and
+        // style the interior as a monospaced block with a tinted background.
+        // Processed first so later passes (headers, bold, links) never touch
+        // source code inside a fence.
+        let fencedPattern = "(?m)^[ \\t]*(`{3,}|~{3,})[^\\n]*\\n([\\s\\S]*?)^[ \\t]*\\1[ \\t]*$"
+        if let fencedRegex = try? NSRegularExpression(pattern: fencedPattern, options: [.anchorsMatchLines]) {
+            let matches = fencedRegex.matches(in: attributed.string, options: [],
+                                              range: NSRange(location: 0, length: attributed.length))
+            let codeFont = NSFont.monospacedSystemFont(ofSize: bodyFont.pointSize - 1, weight: .regular)
+            let codeBg = NSColor.labelColor.withAlphaComponent(0.06)
+            for match in matches.reversed() {
+                let codeRange = match.range(at: 2)
+                guard codeRange.location != NSNotFound else { continue }
+                let codeText = (attributed.string as NSString).substring(with: codeRange)
+                let replacement = NSMutableAttributedString(string: codeText, attributes: [
+                    .font: codeFont,
+                    .foregroundColor: NSColor.labelColor,
+                    .backgroundColor: codeBg,
+                ])
+                attributed.replaceCharacters(in: match.range, with: replacement)
+            }
+        }
+
         func boldFont(matching font: NSFont) -> NSFont {
             let descriptor = font.fontDescriptor.withSymbolicTraits(.bold)
             return NSFont(descriptor: descriptor, size: font.pointSize) ?? font
@@ -1515,12 +1538,13 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
             }
         }
 
-        // Inline code: `text`
+        // Inline code: `text`. Skip ranges already inside a fenced code block.
         if let codeRegex = try? NSRegularExpression(pattern: "`([^`\\n]+)`", options: []) {
             let matches = codeRegex.matches(in: attributed.string, options: [], range: NSRange(location: 0, length: attributed.length))
             for match in matches.reversed() {
                 let innerRange = match.range(at: 1)
                 guard innerRange.location != NSNotFound else { continue }
+                if attributed.attribute(.backgroundColor, at: match.range.location, effectiveRange: nil) != nil { continue }
                 let codeText = (attributed.string as NSString).substring(with: innerRange)
                 let codeFont = NSFont.monospacedSystemFont(ofSize: bodyFont.pointSize - 0.5, weight: .regular)
                 let code = NSAttributedString(string: codeText, attributes: [
@@ -1620,9 +1644,54 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
                 let gridView = makeMarkdownTableView(table)
                 stack.addArrangedSubview(gridView)
                 gridView.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            case .codeBlock(let block):
+                let codeView = makeCodeBlockView(block)
+                stack.addArrangedSubview(codeView)
+                codeView.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             }
         }
         return stack
+    }
+
+    /// Builds a rounded container with monospaced code text, a subtle
+    /// background, and an optional language label in the top-right corner.
+    private func makeCodeBlockView(_ block: MarkdownCodeBlock) -> NSView {
+        let container = AdaptiveTableLayerView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.adaptiveCornerRadius = 8
+        container.adaptiveBackground = NSColor.labelColor.withAlphaComponent(0.06)
+        container.adaptiveBorder = nil
+        container.adaptiveBorderWidth = 0
+
+        let codeFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let tv = ChatLinkTextView.makeBubbleTextView(maxTextWidth: .greatestFiniteMagnitude)
+        tv.textContainerInset = NSSize(width: 12, height: 12)
+        tv.textStorage?.setAttributedString(NSAttributedString(string: block.code, attributes: [
+            .font: codeFont,
+            .foregroundColor: NSColor.labelColor,
+        ]))
+        container.addSubview(tv)
+        tv.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            tv.topAnchor.constraint(equalTo: container.topAnchor),
+            tv.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            tv.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            tv.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
+
+        if let lang = block.language, !lang.isEmpty {
+            let label = NSTextField(labelWithString: lang)
+            label.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+            label.textColor = .secondaryLabelColor
+            label.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+                label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+            ])
+        }
+
+        return container
     }
 
     /// Lay out a single markdown table as a vertical NSStackView of

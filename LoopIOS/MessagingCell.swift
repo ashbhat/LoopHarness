@@ -485,7 +485,7 @@ class MessagingCell: UITableViewCell {
             // routing through the single-text-view + animation path.
             // Streaming animation is skipped here because table responses
             // are typically already complete by the time they render.
-            if MarkdownSegmenter.containsTable(in: data.content) {
+            if MarkdownSegmenter.containsRichContent(in: data.content) {
                 applyRichContent(data: data)
                 return
             }
@@ -747,21 +747,47 @@ class MessagingCell: UITableViewCell {
     }
     
     func attributedString(from text: String) -> NSAttributedString {
+        let bodyFont = UIFont.preferredFont(forTextStyle: .body)
         let fullRange = NSRange(location: 0, length: text.count)
         let attributedString = NSMutableAttributedString(
             string: text,
             attributes: [
-                NSAttributedString.Key.font: UIFont.preferredFont(forTextStyle: .body),
+                NSAttributedString.Key.font: bodyFont,
                 NSAttributedString.Key.foregroundColor: UIColor.label
             ]
         )
+
+        // Fenced code blocks: ```lang\n…\n```. Strip the fence markers and
+        // style the interior as a monospaced block with a tinted background.
+        // Processed first so later passes (headers, bold, links) never touch
+        // source code inside a fence.
+        let fencedPattern = "(?m)^[ \\t]*(`{3,}|~{3,})[^\\n]*\\n([\\s\\S]*?)^[ \\t]*\\1[ \\t]*$"
+
+        do {
+            let fencedRegex = try NSRegularExpression(pattern: fencedPattern, options: [.anchorsMatchLines])
+            let fencedMatches = fencedRegex.matches(in: attributedString.string, options: [],
+                                                    range: NSRange(location: 0, length: attributedString.length))
+            let codeFont = UIFont.monospacedSystemFont(ofSize: bodyFont.pointSize - 1, weight: .regular)
+            let codeBg = UIColor.label.withAlphaComponent(0.06)
+            for match in fencedMatches.reversed() {
+                let codeRange = match.range(at: 2)
+                guard codeRange.location != NSNotFound else { continue }
+                let codeText = (attributedString.string as NSString).substring(with: codeRange)
+                let replacement = NSMutableAttributedString(string: codeText, attributes: [
+                    .font: codeFont,
+                    .foregroundColor: UIColor.label,
+                    .backgroundColor: codeBg,
+                ])
+                attributedString.replaceCharacters(in: match.range, with: replacement)
+            }
+        } catch {}
 
         // Regular expression to find headers that start with '#'
         let headerRegexPattern = "^(#{1,6})\\s*(.*?)$"
 
         do {
             let headerRegex = try NSRegularExpression(pattern: headerRegexPattern, options: [.anchorsMatchLines])
-            let headerMatches = headerRegex.matches(in: text, options: [], range: fullRange)
+            let headerMatches = headerRegex.matches(in: attributedString.string, options: [], range: NSRange(location: 0, length: attributedString.length))
 
             // Iterate over each match and apply header style
             for match in headerMatches.reversed() {
@@ -802,6 +828,29 @@ class MessagingCell: UITableViewCell {
                     // Replace the range in the mutable attributed string
                     attributedString.replaceCharacters(in: match.range, with: boldAttributedString)
                 }
+            }
+
+            // Inline code: `text`. Monospaced font with a subtle background.
+            // Runs after bold so backtick-wrapped content inside **bold `code`**
+            // picks up the code styling. Skips ranges already styled as code
+            // blocks (which carry .backgroundColor from the fenced pass above).
+            let codeRegex = try NSRegularExpression(pattern: "`([^`\\n]+)`", options: [])
+            let codeMatches = codeRegex.matches(in: attributedString.string, options: [],
+                                                range: NSRange(location: 0, length: attributedString.length))
+            let inlineCodeFont = UIFont.monospacedSystemFont(ofSize: bodyFont.pointSize - 0.5, weight: .regular)
+            let inlineCodeBg = UIColor.label.withAlphaComponent(0.08)
+            for match in codeMatches.reversed() {
+                let innerRange = match.range(at: 1)
+                guard innerRange.location != NSNotFound else { continue }
+                // Skip if already inside a fenced code block.
+                if attributedString.attribute(.backgroundColor, at: match.range.location, effectiveRange: nil) != nil { continue }
+                let codeText = (attributedString.string as NSString).substring(with: innerRange)
+                let code = NSAttributedString(string: codeText, attributes: [
+                    .font: inlineCodeFont,
+                    .foregroundColor: UIColor.label,
+                    .backgroundColor: inlineCodeBg,
+                ])
+                attributedString.replaceCharacters(in: match.range, with: code)
             }
 
             // Markdown links: [text](url). Replace the whole match with `text`,
@@ -921,6 +970,9 @@ class MessagingCell: UITableViewCell {
             case .table(let table):
                 let view = makeTableView(table: table)
                 richContentStack.addArrangedSubview(view)
+            case .codeBlock(let block):
+                let view = makeCodeBlockView(block: block)
+                richContentStack.addArrangedSubview(view)
             }
         }
 
@@ -978,6 +1030,55 @@ class MessagingCell: UITableViewCell {
         tv.textColor = .label
         tv.attributedText = attributedString(from: text)
         return tv
+    }
+
+    /// Builds a rounded container with monospaced code text, a subtle
+    /// background, and an optional language label in the top-right corner.
+    private func makeCodeBlockView(block: MarkdownCodeBlock) -> UIView {
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.backgroundColor = UIColor.label.withAlphaComponent(0.06)
+        container.layer.cornerRadius = 8
+        container.layer.cornerCurve = .continuous
+        container.layer.masksToBounds = true
+
+        let codeTV = UITextView()
+        codeTV.translatesAutoresizingMaskIntoConstraints = false
+        codeTV.isScrollEnabled = false
+        codeTV.isEditable = false
+        codeTV.isSelectable = true
+        codeTV.backgroundColor = .clear
+        codeTV.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        codeTV.textContainer.lineFragmentPadding = 0
+        let codeFont = UIFont.monospacedSystemFont(
+            ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize - 1, weight: .regular)
+        codeTV.attributedText = NSAttributedString(string: block.code, attributes: [
+            .font: codeFont,
+            .foregroundColor: UIColor.label,
+        ])
+        container.addSubview(codeTV)
+
+        NSLayoutConstraint.activate([
+            codeTV.topAnchor.constraint(equalTo: container.topAnchor),
+            codeTV.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            codeTV.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            codeTV.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
+
+        if let lang = block.language, !lang.isEmpty {
+            let label = UILabel()
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.text = lang
+            label.font = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+            label.textColor = .secondaryLabel
+            container.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+                label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+            ])
+        }
+
+        return container
     }
 
     /// Build a UIStackView grid for `table`. Rows are full-width with
