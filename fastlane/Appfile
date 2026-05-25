@@ -1,0 +1,8 @@
+app_identifier ENV.fetch("APP_IDENTIFIER", "com.bhat.intel")
+team_id         ENV.fetch("TEAM_ID", nil)
+
+for_platform :ios do
+  for_lane :beta do
+    app_identifier ENV.fetch("APP_IDENTIFIER", "com.bhat.intel")
+  end
+end

@@ -1,0 +1,63 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "Build and upload to TestFlight (internal testers)"
+  lane :beta do
+    # ── 1. App Store Connect API key ──────────────────────────────────
+    api_key = app_store_connect_api_key(
+      key_id:               ENV.fetch("APP_STORE_CONNECT_KEY_ID"),
+      issuer_id:            ENV.fetch("APP_STORE_CONNECT_ISSUER_ID"),
+      key_content:          ENV.fetch("APP_STORE_CONNECT_API_KEY"),
+      is_key_content_base64: ENV.fetch("ASC_KEY_BASE64", "true") == "true",
+      in_house:             false
+    )
+
+    # ── 2. Code-signing via Match ─────────────────────────────────────
+    match(
+      type:     "appstore",
+      readonly: true,
+      api_key:  api_key
+    )
+
+    # ── 3. Build number ──────────────────────────────────────────────
+    # Prefer the GitHub Actions run number for deterministic, always-
+    # incrementing builds. Fall back to latest_testflight_build_number + 1.
+    if ENV["GITHUB_RUN_NUMBER"]
+      build_number = ENV["GITHUB_RUN_NUMBER"]
+    else
+      current = latest_testflight_build_number(api_key: api_key)
+      build_number = (current + 1).to_s
+    end
+
+    increment_build_number(
+      build_number: build_number,
+      xcodeproj:    "Loop.xcodeproj"
+    )
+
+    UI.message("Building with build number #{build_number}")
+
+    # ── 4. Archive ───────────────────────────────────────────────────
+    build_app(
+      project:            "Loop.xcodeproj",
+      scheme:             "Loop_iOS",
+      configuration:      "Release",
+      export_method:      "app-store",
+      destination:        "generic/platform=iOS",
+      output_directory:   "build",
+      output_name:        "Loop.ipa",
+      clean:              true,
+      xcargs:             "-allowProvisioningUpdates"
+    )
+
+    # ── 5. Upload to TestFlight ──────────────────────────────────────
+    upload_to_testflight(
+      api_key:                  api_key,
+      skip_waiting_for_build_processing: false,
+      distribute_external:      false,
+      groups:                   ["Internal"],
+      changelog:                "Build #{build_number} — automated via CI."
+    )
+
+    UI.success("Build #{build_number} uploaded and distributed to Internal testers group.")
+  end
+end
