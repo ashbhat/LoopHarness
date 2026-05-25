@@ -475,6 +475,7 @@ var tools: [[String: Any]] = {
     all += NavigationSkill.tools
     all += CursorSkill.tools
     all += DevinSkill.tools
+    all += TwitterSkill.tools
     // Dynamic, user-authored skills get appended in AgentHarness at every
     // chat turn so newly hot-loaded skills become visible without restart.
     return all

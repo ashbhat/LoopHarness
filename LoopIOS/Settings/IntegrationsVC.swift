@@ -121,6 +121,7 @@ final class IntegrationsVC: UIViewController {
             slackIntegration(),
             githubIntegration(),
             devinIntegration(),
+            twitterIntegration(),
         ]
 
         tableView.reloadData()
@@ -348,6 +349,48 @@ final class IntegrationsVC: UIViewController {
         stack.append(KeysVC())
         stack.append(KeyEditVC(focusing: .slackUserToken))
         nav.setViewControllers(stack, animated: true)
+    }
+
+    // MARK: Twitter
+
+    private func twitterIntegration() -> Integration {
+        let hasKey = !((KeyStore.shared.value(for: .xAPIKey) ?? "").isEmpty)
+        return Integration(
+            title: "X (Twitter)",
+            subtitle: hasKey
+                ? "Connected \u{00B7} OAuth 1.0a keys"
+                : "Tap to add your X API keys",
+            icon: "bubble.left",
+            tint: .label,
+            status: hasKey ? .connected : .notConnected,
+            handler: { vc in vc.handleTwitterTap() }
+        )
+    }
+
+    private func handleTwitterTap() {
+        let hasKey = !((KeyStore.shared.value(for: .xAPIKey) ?? "").isEmpty)
+        if hasKey {
+            let alert = UIAlertController(
+                title: "X (Twitter) connected",
+                message: "Loop can post tweets on your behalf. You can replace or remove the keys in Settings \u{2192} Keys.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "Edit Keys", style: .default) { [weak self] _ in
+                guard let nav = self?.navigationController else { return }
+                var stack = nav.viewControllers
+                stack.append(KeysVC())
+                stack.append(KeyEditVC(focusing: .xAPIKey))
+                nav.setViewControllers(stack, animated: true)
+            })
+            alert.addAction(UIAlertAction(title: "Done", style: .cancel))
+            present(alert, animated: true)
+        } else {
+            guard let nav = navigationController else { return }
+            var stack = nav.viewControllers
+            stack.append(KeysVC())
+            stack.append(KeyEditVC(focusing: .xAPIKey))
+            nav.setViewControllers(stack, animated: true)
+        }
     }
 
     private func handleCalendarTap() {

@@ -125,6 +125,9 @@ final class SkillDispatcher {
         if DevinSkill.shared.handles(functionName: call.name) {
             DevinSkill.shared.handle(functionCall: call, completion: completion); return
         }
+        if TwitterSkill.shared.handles(functionName: call.name) {
+            TwitterSkill.shared.handle(functionCall: call, completion: completion); return
+        }
 
         // Runtime-registered skills (Mac-only). Checked under the lock so a
         // concurrent register() can't tear the iteration.

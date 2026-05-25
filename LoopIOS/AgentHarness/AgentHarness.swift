@@ -113,6 +113,7 @@ final class AgentHarness {
         ("Integration",      "Manage third-party service connections"),
         ("Cursor",           "Dispatch coding tasks to Cursor cloud agents (opens PRs)"),
         ("Devin",            "Dispatch coding tasks to Devin cloud agents (opens PRs, live transcript)"),
+        ("X (Twitter)",      "Post tweets to X (Twitter) with confirmation"),
     ]
 
     private init() {
@@ -139,7 +140,8 @@ final class AgentHarness {
             IntegrationSkill.systemPromptFragment,
             NavigationSkill.systemPromptFragment,
             CursorSkill.systemPromptFragment,
-            DevinSkill.systemPromptFragment
+            DevinSkill.systemPromptFragment,
+            TwitterSkill.systemPromptFragment
         ].joined(separator: "\n\n")
         self.staticToolsDocLength = toolsDoc.count
         self.staticToolSchemasCount = toolSchemas.count

@@ -121,6 +121,7 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
         // single-window so we own this slot for the process lifetime.
         SlackSkill.shared.host = self
         GitHubSkill.shared.host = self
+        TwitterSkill.shared.host = self
 
         // Bootstrap the first tab around whatever conversation the initial
         // coordinator just attached to (`loadLastConversation()` ran in its
@@ -3133,4 +3134,24 @@ private final class MapBubbleViewDelegate: NSObject, MKMapViewDelegate {
     }
 
     private static var placeAssocKey: UInt8 = 0
+}
+
+// MARK: - TwitterSkillHost
+
+extension ConversationWindowController: TwitterSkillHost {
+    func twitterSkill(requestPostConfirmation text: String,
+                      completion: @escaping (Bool) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "Post this tweet?"
+        alert.informativeText = text
+        alert.addButton(withTitle: "Post")
+        alert.addButton(withTitle: "Cancel")
+        if let window = self.window {
+            alert.beginSheetModal(for: window) { response in
+                completion(response == .alertFirstButtonReturn)
+            }
+        } else {
+            completion(alert.runModal() == .alertFirstButtonReturn)
+        }
+    }
 }

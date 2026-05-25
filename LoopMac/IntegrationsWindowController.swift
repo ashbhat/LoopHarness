@@ -171,6 +171,7 @@ fileprivate final class IntegrationsListViewController: NSViewController, NSTabl
             ),
             slackIntegration(),
             devinIntegration(),
+            twitterIntegration(),
         ]
 
         tableView.reloadData()
@@ -290,6 +291,38 @@ fileprivate final class IntegrationsListViewController: NSViewController, NSTabl
             }
         } else {
             SettingsWindowController.shared.showKeys(selecting: .slackUserToken)
+        }
+    }
+
+    // MARK: Twitter handler
+
+    private func twitterIntegration() -> Integration {
+        let hasKey = !((KeyStore.shared.value(for: .xAPIKey) ?? "").isEmpty)
+        return Integration(
+            title: "X (Twitter)",
+            subtitle: hasKey
+                ? "Connected · OAuth 1.0a keys"
+                : "Click to add your X API keys",
+            icon: "bubble.left",
+            tint: .labelColor,
+            status: hasKey ? .connected : .notConnected,
+            handler: { vc in vc.handleTwitterTap() }
+        )
+    }
+
+    fileprivate func handleTwitterTap() {
+        let hasKey = !((KeyStore.shared.value(for: .xAPIKey) ?? "").isEmpty)
+        if hasKey {
+            let alert = NSAlert()
+            alert.messageText = "X (Twitter) connected"
+            alert.informativeText = "Loop can post tweets on your behalf. You can replace or remove the keys in Settings → Keys."
+            alert.addButton(withTitle: "Edit Keys")
+            alert.addButton(withTitle: "Done")
+            if alert.runModal() == .alertFirstButtonReturn {
+                SettingsWindowController.shared.showKeys(selecting: .xAPIKey)
+            }
+        } else {
+            SettingsWindowController.shared.showKeys(selecting: .xAPIKey)
         }
     }
 
