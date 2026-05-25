@@ -33,8 +33,28 @@ import Foundation
 struct TerminalSkill {
     static let shared = TerminalSkill()
 
-    /// System-prompt fragment registered alongside the tools.
-    static let systemPromptFragment: String = """
+    /// True when the process is running inside the macOS App Sandbox.
+    /// The PTY-backed in-app shell (`forkpty`/`execv` of the user's login
+    /// shell) and the NSAppleScript automation of Terminal.app both fall
+    /// over under the sandbox — the child process inherits the sandbox
+    /// (so it can't access the user's files anyway) and Apple Events
+    /// targeting another app require a temporary-exception entitlement
+    /// that Mac App Store / TestFlight builds can't ship. We therefore
+    /// hide every terminal tool from the model and refuse to handle any
+    /// of them when sandboxed; the rest of the app keeps working.
+    static let isSandboxed: Bool = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+
+    /// Tools visible to the model. Empty array under sandbox so the
+    /// agent doesn't see terminal tools it can't actually drive.
+    static var tools: [[String: Any]] { isSandboxed ? [] : _tools }
+
+    /// System-prompt fragment registered alongside the tools. Empty
+    /// under sandbox to avoid confusing the model about capabilities
+    /// that aren't wired up in this build.
+    static var systemPromptFragment: String { isSandboxed ? "" : _systemPromptFragment }
+
+    /// Underlying system-prompt fragment used when not sandboxed.
+    private static let _systemPromptFragment: String = """
 You have access to a real shell on the user's Mac via an in-app terminal session that's tied to the current conversation. The user can see a pill above the recorder bar whenever a session is alive, tap it to watch you work, and "Stop Loop" any time to take over.
 
 **Default behavior — primary agents must delegate terminal work:**
@@ -60,7 +80,7 @@ Workflow tips for the sub-agent (or inline use):
 - Don't chain destructive commands (rm -rf, sudo, anything outside the working dir) without an explicit user instruction in this turn.
 """
 
-    static let tools: [[String: Any]] = [
+    private static let _tools: [[String: Any]] = [
         [
             "type": "function",
             "function": [
@@ -203,6 +223,7 @@ Workflow tips for the sub-agent (or inline use):
     ]
 
     func handles(functionName: String) -> Bool {
+        if TerminalSkill.isSandboxed { return false }
         return TerminalSkill.toolNames.contains(functionName)
     }
 

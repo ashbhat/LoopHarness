@@ -92,8 +92,14 @@ final class SkillDispatcher {
         if LocationSkill.shared.handles(functionName: call.name) {
             LocationSkill.shared.handle(functionCall: call, completion: completion); return
         }
+        if MapsSkill.shared.handles(functionName: call.name) {
+            MapsSkill.shared.handle(functionCall: call, completion: completion); return
+        }
         if ImageSkill.shared.handles(functionName: call.name) {
             ImageSkill.shared.handle(functionCall: call, completion: completion); return
+        }
+        if PDFSkill.shared.handles(functionName: call.name) {
+            PDFSkill.shared.handle(functionCall: call, completion: completion); return
         }
         if ObsidianSkill.shared.handles(functionName: call.name) {
             ObsidianSkill.shared.handle(functionCall: call, completion: completion); return
@@ -109,6 +115,9 @@ final class SkillDispatcher {
         }
         if IntegrationSkill.shared.handles(functionName: call.name) {
             IntegrationSkill.shared.handle(functionCall: call, completion: completion); return
+        }
+        if NavigationSkill.shared.handles(functionName: call.name) {
+            NavigationSkill.shared.handle(functionCall: call, completion: completion); return
         }
         if CursorSkill.shared.handles(functionName: call.name) {
             CursorSkill.shared.handle(functionCall: call, completion: completion); return

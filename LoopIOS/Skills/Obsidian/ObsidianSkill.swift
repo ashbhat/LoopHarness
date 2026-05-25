@@ -379,6 +379,18 @@ Workflow tips:
         let args = functionCall.arguments
         let name = functionCall.name
 
+        // Short-circuit if the Obsidian relay isn't configured. Returning the
+        // ask as a function-role result lets the model phrase a friendly
+        // request to the user rather than spilling a raw error string.
+        if !ObsidianClient.isConfigured {
+            let content = KeyStore.missingKeyInstruction(
+                for: [.obsidianBaseURL, .obsidianAPI],
+                purpose: "your Obsidian vault (requires a self-hosted Obsidian relay)"
+            )
+            completion(MessageStruct(role: "function", content: content, name: name))
+            return
+        }
+
         switch name {
 
         case "create_obsidian_today_note":

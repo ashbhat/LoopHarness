@@ -82,6 +82,8 @@
 	<string>Loop reads your calendar to answer schedule questions and drafts new events for you to review before saving.</string>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Loop uses Apple Music to find tracks, build playlists, and play music that matches the mood of the conversation.</string>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

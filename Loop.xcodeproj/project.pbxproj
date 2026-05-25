@@ -60,10 +60,76 @@
 			);
 			target = 6A0903822CD69D9500E70D46 /* Loop */;
 		};
+		6B00010600000000DEADBEEF /* Exceptions for "LoopMac" folder in "LoopMac" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 6B00010A00000000DEADBEEF /* LoopMac */;
+		};
+		6B00010700000000DEADBEEF /* Exceptions for "LoopIOS" folder in "LoopMac" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AppDelegate.swift,
+				Assets.xcassets,
+				HelperViews/AvatarView.swift,
+				HelperViews/ShimmerLabel.swift,
+				ImageViewerVC.swift,
+				Info.plist,
+				LifeView/LifeView.swift,
+				MainVC.swift,
+				MarkdownEditorViewController.swift,
+				MessageBox.swift,
+				MessagingCell.swift,
+				MessagingVC.swift,
+				Onboarding/ActionButtonReminderBarView.swift,
+				Onboarding/OnboardingCardView.swift,
+				Onboarding/OnboardingViewController.swift,
+				SceneDelegate.swift,
+				Settings/IntegrationsVC.swift,
+				Settings/KeyEditVC.swift,
+				Settings/KeysVC.swift,
+				Settings/ModelPickerVC.swift,
+				Settings/SettingsVC.swift,
+				SideDrawerViewController.swift,
+				SpeechPipeline/EarconPlayer.swift,
+				SpeechPipeline/VoiceLoopCoordinator.swift,
+				TriggerIntent.swift,
+			);
+			target = 6B00010A00000000DEADBEEF /* LoopMac */;
+		};
 		6C00020600000000DEADBEEF /* Exceptions for "LoopVision" folder in "LoopVision" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+			);
+			target = 6C00020A00000000DEADBEEF /* LoopVision */;
+		};
+		6C00020700000000DEADBEEF /* Exceptions for "LoopIOS" folder in "LoopVision" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AppDelegate.swift,
+				HelperViews/AvatarView.swift,
+				HelperViews/ShimmerLabel.swift,
+				ImageViewerVC.swift,
+				Info.plist,
+				LifeView/LifeView.swift,
+				MainVC.swift,
+				MarkdownEditorViewController.swift,
+				MessageBox.swift,
+				MessagingCell.swift,
+				MessagingVC.swift,
+				Onboarding/ActionButtonReminderBarView.swift,
+				Onboarding/OnboardingCardView.swift,
+				Onboarding/OnboardingViewController.swift,
+				SceneDelegate.swift,
+				Settings/IntegrationsVC.swift,
+				Settings/KeyEditVC.swift,
+				Settings/KeysVC.swift,
+				Settings/ModelPickerVC.swift,
+				Settings/SettingsVC.swift,
+				SideDrawerViewController.swift,
+				TriggerIntent.swift,
 			);
 			target = 6C00020A00000000DEADBEEF /* LoopVision */;
 		};
@@ -82,12 +148,17 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				6A09038A2CD69D9500E70D46 /* Exceptions for "LoopIOS" folder in "Loop" target */,
+				6B00010700000000DEADBEEF /* Exceptions for "LoopIOS" folder in "LoopMac" target */,
+				6C00020700000000DEADBEEF /* Exceptions for "LoopIOS" folder in "LoopVision" target */,
 			);
 			path = LoopIOS;
 			sourceTree = "<group>";
 		};
 		6B00010500000000DEADBEEF /* LoopMac */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				6B00010600000000DEADBEEF /* Exceptions for "LoopMac" folder in "LoopMac" target */,
+			);
 			path = LoopMac;
 			sourceTree = "<group>";
 		};

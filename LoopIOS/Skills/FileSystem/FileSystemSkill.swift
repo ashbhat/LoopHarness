@@ -61,6 +61,12 @@ Tools:
 - file_list(path?, recursive?) → directory contents with type / size / modified.
 - file_search(query, scope?, path?) → find by filename or content.
 - folder_create(path) → mkdir -p.
+- share_file(path) → render the file as a rich card (title, kind badge, snippet
+  preview, tap-to-open) in the chat. Use this whenever the user asks to see,
+  preview, render, attach, or share a file. Don't `file_read` and then paste
+  the contents into a fenced code block — call `share_file(path)` and let the
+  card handle the visual. For multiple files, call once per file. A tiny
+  follow-up sentence is fine ("Here you go.") but don't restate the contents.
 
 When you save user-facing context (their preferences, decisions, recurring
 facts), prefer the canonical context files via update_self_doc rather than
@@ -207,13 +213,27 @@ file_write — those are loaded into every system prompt automatically.
                     "required": ["path"]
                 ]
             ]
+        ],
+        [
+            "type": "function",
+            "function": [
+                "name": "share_file",
+                "description": "Surface a workspace file as a rich card in the chat — title, type badge, snippet preview, tap-to-open. Use this whenever the user asks to see, preview, render, attach, or share a file. Do NOT call `file_read` and inline the contents in a fenced code block — call `share_file(path)` instead. Multiple files: call once per file.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "path": ["type": "string", "description": "Workspace-relative path of the file to share."]
+                    ],
+                    "required": ["path"]
+                ]
+            ]
         ]
     ]
 
     static let toolNames: Set<String> = [
         "file_read", "file_write", "file_edit", "file_append",
         "file_delete", "file_move", "file_list", "file_search",
-        "folder_create"
+        "folder_create", "share_file"
     ]
 
     func handles(functionName: String) -> Bool {
@@ -243,6 +263,7 @@ file_write — those are loaded into every system prompt automatically.
             }
             return "searching workspace"
         case "folder_create": return "creating folder \(label)"
+        case "share_file":    return "sharing \(label)"
         default:              return nil
         }
     }
@@ -254,6 +275,17 @@ file_write — those are loaded into every system prompt automatically.
         let work = { [weak self] in
             guard let self = self else { return }
             print("FileSystemSkill: → \(functionCall.name) args=\(functionCall.arguments) backend=\(Workspace.shared.backend) root=\(Workspace.shared.rootURL.path)")
+            // share_file builds a MessageStruct directly (with fileAttachment
+            // set) instead of returning a JSON payload — its whole purpose is
+            // the rendered card. Route it before the JSON-payload switch.
+            if functionCall.name == "share_file" {
+                let message = self.shareFile(functionCall.arguments,
+                                             conversationId: functionCall.conversationId)
+                DispatchQueue.main.async {
+                    completion(message)
+                }
+                return
+            }
             let result: [String: Any]
             switch functionCall.name {
             case "file_read":     result = self.fileRead(functionCall.arguments)
@@ -275,6 +307,65 @@ file_write — those are loaded into every system prompt automatically.
         }
         // Disk + iCloud-download work — keep off the main thread.
         DispatchQueue.global(qos: .userInitiated).async(execute: work)
+    }
+
+    // MARK: - share_file
+
+    /// Build a FileAttachment from a workspace file and return a function-role
+    /// message that carries it. The chat cell renders the attachment as a
+    /// FilePreviewCardView (markdown / text / generic kinds) or an inline
+    /// image / PDF bubble, with tap-to-open routed through the existing
+    /// per-kind handler. The model gets a short text confirmation so it knows
+    /// the share landed and doesn't try to also inline the contents.
+    private func shareFile(_ args: [String: Any],
+                           conversationId: String?) -> MessageStruct {
+        guard let path = args["path"] as? String, !path.isEmpty else {
+            return FileSystemSkill.functionMessage(
+                name: "share_file",
+                payload: ["status": "error", "error": "path is required"])
+        }
+        let url: URL
+        do {
+            url = try Workspace.shared.resolve(path)
+            try Workspace.shared.ensureDownloaded(url)
+        } catch {
+            return FileSystemSkill.functionMessage(
+                name: "share_file",
+                payload: ["status": "error",
+                          "error": "could not resolve \(path): \(error.localizedDescription)"])
+        }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else {
+            return FileSystemSkill.functionMessage(
+                name: "share_file",
+                payload: ["status": "error", "error": "no such file: \(path)"])
+        }
+        if isDir.boolValue {
+            return FileSystemSkill.functionMessage(
+                name: "share_file",
+                payload: ["status": "error",
+                          "error": "\(path) is a folder — share_file only handles individual files"])
+        }
+        let attachment: FileAttachment
+        do {
+            attachment = try AttachmentStore.shared.saveFromFileURL(url)
+        } catch {
+            return FileSystemSkill.functionMessage(
+                name: "share_file",
+                payload: ["status": "error",
+                          "error": "couldn't snapshot \(path): \(error.localizedDescription)"])
+        }
+        // Body the LLM sees as the result. Short on purpose — the visible
+        // surface is the rendered card. Mentioning the path keeps the model
+        // grounded if it wants to follow up with edits.
+        let body = "Shared \(attachment.fileName) with the user as an attachment card."
+        var msg = MessageStruct(role: "function",
+                                content: body,
+                                name: "share_file",
+                                fileAttachment: attachment)
+        msg.callId = nil
+        _ = conversationId  // currently unused — FileAttachment has no conversation field
+        return msg
     }
 
     // MARK: - Tool handlers

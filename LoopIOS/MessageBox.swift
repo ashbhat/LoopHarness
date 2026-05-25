@@ -27,7 +27,12 @@ class MessageBox: UIView {
     weak var delegate: MessageBoxDelegate?
     let emptyLabel = UILabel(frame: .zero)
     let containerView = UIView()
-    let textView = UITextView()
+    let textView = MessageInputTextView()
+
+    /// Max height for the input text view. Picked to fit ~6 lines of body
+    /// text — enough that most messages don't need to scroll, but small
+    /// enough that pasting a wall of text doesn't push the chat off-screen.
+    fileprivate static let inputMaxHeight: CGFloat = 140
     let sendButton = UIButton()
     /// Paperclip button shown in the same slot as `sendButton` while the
     /// textfield is empty AND no attachment is staged. Tapping opens the
@@ -204,6 +209,11 @@ class MessageBox: UIView {
             textView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10),
             textView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10),
             textView.heightAnchor.constraint(greaterThanOrEqualToConstant: 20),
+            // Cap the input at ~6 lines of body text. Once content exceeds
+            // this, `textViewDidChange` flips `isScrollEnabled` so the user
+            // scrolls inside the bounded view instead of the input eating
+            // the whole chat. See `MessageBox.inputMaxHeight`.
+            textView.heightAnchor.constraint(lessThanOrEqualToConstant: MessageBox.inputMaxHeight),
             
             sendButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -10),
             sendButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10),
@@ -247,6 +257,13 @@ class MessageBox: UIView {
         textView.isScrollEnabled = false
         textView.font = UIFont.preferredFont(forTextStyle: .body)
         textView.delegate = self
+        textView.onShiftReturn = { [weak self] in
+            guard let self else { return }
+            let hasText = !(self.textView.text ?? "").isEmpty
+            let hasAttachment = self.pendingAttachment != nil
+            guard hasText || hasAttachment else { return }
+            self.sendButtonTapped()
+        }
         textView.backgroundColor = UIColor.clear
         textView.textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
         textView.textContainer.lineFragmentPadding = 0
@@ -972,6 +989,25 @@ extension MessageBox: UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) {
         emptyLabel.isHidden = textView.text.count > 0
         refreshTrailingButton()
+        updateInputScrollState()
+    }
+
+    /// Toggle the text view between "grow to fit content" (no scroll,
+    /// intrinsic content size drives height) and "fixed max with internal
+    /// scrolling" once content overflows `inputMaxHeight`. Without this,
+    /// `isScrollEnabled = false` would keep growing forever and the input
+    /// would eat the chat area on long pastes.
+    fileprivate func updateInputScrollState() {
+        let target = textView.sizeThatFits(CGSize(width: textView.bounds.width,
+                                                   height: .greatestFiniteMagnitude)).height
+        let shouldScroll = target >= MessageBox.inputMaxHeight
+        if textView.isScrollEnabled != shouldScroll {
+            textView.isScrollEnabled = shouldScroll
+            // When flipping back to non-scrolling, force a layout pass so
+            // intrinsic content size recomputes immediately; otherwise the
+            // input briefly stays at the capped height after a delete.
+            textView.invalidateIntrinsicContentSize()
+        }
     }
 }
 
@@ -1029,6 +1065,18 @@ extension MessageBox {
                     self.attachmentThumbnailView.contentMode = .scaleAspectFill
                 }
             }
+        case .markdown:
+            attachmentThumbnailView.image = UIImage(systemName: "doc.text")
+            attachmentThumbnailView.contentMode = .center
+            attachmentThumbnailView.backgroundColor = UIColor.systemFill
+        case .text:
+            attachmentThumbnailView.image = UIImage(systemName: "chevron.left.forwardslash.chevron.right")
+            attachmentThumbnailView.contentMode = .center
+            attachmentThumbnailView.backgroundColor = UIColor.systemFill
+        case .generic:
+            attachmentThumbnailView.image = UIImage(systemName: "doc")
+            attachmentThumbnailView.contentMode = .center
+            attachmentThumbnailView.backgroundColor = UIColor.systemFill
         }
     }
 
@@ -1403,10 +1451,11 @@ extension MessageBox: UIImagePickerControllerDelegate, UINavigationControllerDel
 
     private func presentDocumentPicker() {
         guard let presenter = self.parentViewController else { return }
-        // Accept the same kinds AttachmentStore can persist: images + PDF.
-        // `asCopy: true` so the system hands us a temporary file we own —
-        // we then copy it into the workspace via AttachmentStore.
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.image, .pdf], asCopy: true)
+        // Any file the user can pick — AttachmentStore kinds it on save
+        // (image / pdf / markdown / source / text / generic) and enforces
+        // the 20 MB size cap. `asCopy: true` so the system hands us a
+        // temporary file we own; we then copy it into the workspace.
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
         picker.delegate = self
         picker.allowsMultipleSelection = false
         presenter.present(picker, animated: true)
@@ -1483,5 +1532,25 @@ extension MessageBox: UIDocumentPickerDelegate {
         } catch {
             print("Image attach failed: \(error.localizedDescription)")
         }
+    }
+}
+
+/// UITextView subclass that fires `onShiftReturn` when a hardware-keyboard
+/// Shift+Return is pressed. UITextView normally consumes Return to insert
+/// a newline, so we intercept in `pressesBegan` before the system handles
+/// the press; plain Return falls through to the default newline behavior.
+final class MessageInputTextView: UITextView {
+    var onShiftReturn: (() -> Void)?
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        for press in presses {
+            guard let key = press.key else { continue }
+            if key.keyCode == .keyboardReturnOrEnter,
+               key.modifierFlags.contains(.shift) {
+                onShiftReturn?()
+                return
+            }
+        }
+        super.pressesBegan(presses, with: event)
     }
 }

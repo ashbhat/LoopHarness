@@ -9,6 +9,7 @@
 
 import AppKit
 import PDFKit
+import MapKit
 
 final class ConversationWindowController: NSWindowController, ConversationPresenter, NSToolbarDelegate, TabBarViewDelegate {
     /// Open tabs in display order. Index 0 is the leftmost cell; the active
@@ -29,6 +30,15 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
     /// Recorder bar reference so we can rebind which coordinator it drives
     /// when the user switches tabs. Weak — AppDelegate owns the recorder.
     private weak var recorder: RecorderWindowController?
+
+    /// In-memory sidecar mapping message id → `OnboardingCardKind`. The
+    /// `SimpleConversation` store doesn't serialize the card enum, so this
+    /// dictionary is where the live chips for currently-posted onboarding
+    /// bubbles live. Looked up in `rebuild(messages:)` so the chip row
+    /// re-renders after every redraw. Cleared when onboarding completes;
+    /// keys for `.answered` bubbles stay around so the bubble doesn't
+    /// flicker back to chips on the next rebuild.
+    private var onboardingCards: [String: OnboardingCardKind] = [:]
 
     private let tabBarView = TabBarView()
     private let scrollView = NSScrollView()
@@ -59,6 +69,15 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
     /// inserting a new one.
     private var imageBubbles: [String: ImageBubbleView] = [:]
     private static let imageMessageIdPrefix = "image-"
+
+    /// Live registry of PDF attachments + their bubbles, parallel to the
+    /// image plumbing above. The placeholder message lives in the store
+    /// under id `pdf-<attachmentId>`; the in-memory `pdfAttachments` map
+    /// carries the live state so a tab switch or window reload can
+    /// re-render the bubble in whatever state it last reached.
+    private var pdfBubbles: [String: PDFBubbleView] = [:]
+    private(set) var pdfAttachments: [String: PDFAttachment] = [:]
+    private static let pdfMessageIdPrefix = "pdf-"
 
     /// The markdown editor currently slid up over the chat pane, if any, plus
     /// the top constraint we animate to drive the vertical slide.
@@ -125,13 +144,38 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
         refreshTabBar()
         reloadFromStore()
 
+        // Hook the shared onboarding coordinator. On Mac we skip the iOS
+        // action-button step (no Action Button hardware to bind). The
+        // coordinator no-ops if `OnboardingState.isComplete` so existing
+        // users see nothing change. Posted prompts land in the active tab's
+        // conversation, with chips rendered via `onboardingCards` sidecar.
+        OnboardingCoordinator.shared.skipActionButtonStep = true
+        OnboardingCoordinator.shared.host = self
+        DispatchQueue.main.async {
+            OnboardingCoordinator.shared.resumeIfNeeded()
+        }
+
         // Reload the bubble stack when a sub-agent posts its completion
         // summary into the active conversation so the user sees it appear
-        // without having to refocus or click around.
+        // without having to refocus or click around. Devin and Cursor post
+        // back through separate notification names but use the same userInfo
+        // shape (conversationId + messageId), so one handler covers all three.
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(subAgentDidPostMessage(_:)),
             name: .subAgentDidPostMessage,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(subAgentDidPostMessage(_:)),
+            name: .devinAgentDidPostMessage,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(subAgentDidPostMessage(_:)),
+            name: .cursorAgentDidPostMessage,
             object: nil
         )
         // Each coordinator broadcasts its state transitions; refresh the tab
@@ -814,8 +858,30 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
         // Forget the bubble views — they're being torn down. The attachment
         // map survives so we can re-render their state below.
         imageBubbles.removeAll()
+        pdfBubbles.removeAll()
         let manager = SimpleConversationManager.shared
         for message in messages {
+            // Map embed and share_file results ride on a function-role
+            // message (the tool result whose only surface is the rendered
+            // visual). Surface them before the role switch so they don't
+            // get dropped by the "skip non-user/assistant" default below.
+            if message.role == "function" {
+                let m = manager.messageStruct(from: message)
+                if let mapAttachment = m.mapAttachment {
+                    stack.addArrangedSubview(makeMapRow(bubbleView: MapBubbleView(attachment: mapAttachment)))
+                } else if let fileAttachment = m.fileAttachment {
+                    // role="assistant" routes the existing bubble factory
+                    // to the assistant-side alignment (leading edge,
+                    // borderless caption) instead of the user-upload look.
+                    // Pass an empty caption — `m.content` here is the
+                    // LLM-only confirmation ("Shared X with the user…")
+                    // and shouldn't appear under the card for the human.
+                    stack.addArrangedSubview(makeAttachmentBubble(attachment: fileAttachment,
+                                                                   text: "",
+                                                                   role: "assistant"))
+                }
+                continue
+            }
             switch message.role {
             case "user", "assistant":
                 // image-prefixed assistant rows are placeholder messages from
@@ -840,13 +906,51 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
                     continue
                 }
 
+                // pdf-prefixed assistant rows mirror the image branch: the
+                // placeholder message in the store has no real content; the
+                // live attachment lives in `pdfAttachments`. If we don't
+                // have it (cold relaunch before the render completed), the
+                // bubble surfaces the same "no longer available" recovery.
+                if message.role == "assistant",
+                   message.id.hasPrefix(Self.pdfMessageIdPrefix) {
+                    let attachmentId = String(message.id.dropFirst(Self.pdfMessageIdPrefix.count))
+                    let attachment = pdfAttachments[attachmentId]
+                        ?? PDFAttachment(id: attachmentId,
+                                         title: message.content.isEmpty ? "Untitled PDF" : message.content,
+                                         template: "report",
+                                         document: "",
+                                         status: .failed,
+                                         failureReason: "PDF is no longer available — ask Loop to regenerate it.")
+                    let bubble = PDFBubbleView(attachment: attachment,
+                                               onPreview: { [weak self] att in self?.previewPDF(attachment: att) },
+                                               onShare:   { [weak self] att, sender in self?.sharePDF(attachment: att, from: sender) },
+                                               onRetry:   { [weak self] att in self?.retryPDF(attachment: att) })
+                    pdfBubbles[attachmentId] = bubble
+                    stack.addArrangedSubview(makePDFRow(bubbleView: bubble))
+                    continue
+                }
+
                 // Going through messageStruct gives us the decoded
                 // FileAttachment (if any) without re-parsing JSON here.
                 let m = manager.messageStruct(from: message)
+                // Onboarding bubble: chip row hangs off the assistant prompt.
+                // The card itself isn't persisted (the kind enum has
+                // associated values that don't round-trip through the store),
+                // so the live card lives in `onboardingCards` keyed by id.
+                if message.role == "assistant",
+                   let card = onboardingCards[message.id] {
+                    stack.addArrangedSubview(
+                        MacOnboardingChipBubble.makeBubble(text: message.content,
+                                                          card: card,
+                                                          delegate: self))
+                    continue
+                }
                 if let attachment = m.fileAttachment {
                     stack.addArrangedSubview(makeAttachmentBubble(attachment: attachment,
                                                                    text: m.content,
                                                                    role: message.role))
+                } else if let mapAttachment = m.mapAttachment {
+                    stack.addArrangedSubview(makeMapRow(bubbleView: MapBubbleView(attachment: mapAttachment)))
                 } else {
                     stack.addArrangedSubview(makeBubble(role: message.role, text: message.content, model: m.role == "assistant" ? m.model : nil))
                 }
@@ -867,6 +971,36 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
         ImageGenerationService.shared.retry(
             attachmentId: attachment.id,
             prompt: attachment.prompt,
+            conversationId: attachment.conversationId
+        )
+    }
+
+    // MARK: - PDF bubble actions
+
+    private func previewPDF(attachment: PDFAttachment) {
+        guard let url = attachment.fileURL,
+              FileManager.default.fileExists(atPath: url.path) else { return }
+        // NSWorkspace.open hands the PDF to Preview.app (or whichever
+        // handler the user has set). Quick Look would also work via
+        // QLPreviewPanel but it requires a controller-style data source —
+        // hand-off to Preview is one line and matches what the user
+        // expects from a file in chat.
+        NSWorkspace.shared.open(url)
+    }
+
+    private func sharePDF(attachment: PDFAttachment, from sender: NSView) {
+        guard let url = attachment.fileURL,
+              FileManager.default.fileExists(atPath: url.path) else { return }
+        let picker = NSSharingServicePicker(items: [url])
+        picker.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+    }
+
+    private func retryPDF(attachment: PDFAttachment) {
+        PDFGenerationService.shared.retry(
+            attachmentId: attachment.id,
+            title: attachment.title,
+            document: attachment.document,
+            template: attachment.template,
             conversationId: attachment.conversationId
         )
     }
@@ -1080,11 +1214,14 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
         return row
     }
 
-    /// Render a user-uploaded attachment (image or PDF) as a bubble, with any
-    /// accompanying text underneath. Right-aligned for user role; left for
-    /// (hypothetical) assistant attachments. Tapping isn't supported on Mac —
-    /// the file is accessible via the workspace folder in Finder.
+    /// Render a user-uploaded attachment as a bubble, with any accompanying
+    /// text underneath. Image / PDF kinds get an inline thumbnail (click →
+    /// open in Preview); markdown / source / text / generic kinds route to
+    /// `makeFilePreviewCardBubble` for the icon+snippet card path.
     private func makeAttachmentBubble(attachment: FileAttachment, text: String, role: String) -> NSView {
+        if attachment.kind != .image && attachment.kind != .pdf {
+            return makeFilePreviewCardBubble(attachment: attachment, text: text, role: role)
+        }
         let isUser = role == "user"
 
         let bubble = NSView()
@@ -1165,11 +1302,108 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
                 image = (try? Data(contentsOf: url)).flatMap(NSImage.init(data:))
             case .pdf:
                 image = ConversationWindowController.renderPDFThumbnail(at: url, size: pdfSize)
+            case .markdown, .text, .generic:
+                // Unreachable — the guard at the top of makeAttachmentBubble
+                // routes these kinds to the card path. Compiler requires the
+                // case for exhaustiveness on the non-frozen `Kind` enum.
+                image = nil
             }
             DispatchQueue.main.async {
                 preview?.image = image
             }
         }
+
+        // Right-align user bubbles in a containing row, matching makeBubble.
+        let row = NSStackView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.orientation = .horizontal
+        row.alignment = .top
+        if isUser {
+            let spacer = NSView()
+            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            row.addArrangedSubview(spacer)
+            row.addArrangedSubview(bubble)
+        } else {
+            row.addArrangedSubview(bubble)
+            let spacer = NSView()
+            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            row.addArrangedSubview(spacer)
+        }
+        bubble.widthAnchor.constraint(lessThanOrEqualToConstant: 380).isActive = true
+        return row
+    }
+
+    /// Card variant of the attachment bubble used for markdown / source /
+    /// plain-text / generic kinds. Renders icon + filename (+ language
+    /// badge for source) + subtitle + snippet of the file contents. Click
+    /// behavior mirrors message-link handling: markdown opens in the
+    /// in-app editor, everything else opens in the system handler.
+    private func makeFilePreviewCardBubble(attachment: FileAttachment, text: String, role: String) -> NSView {
+        let isUser = role == "user"
+
+        let bubble = NSView()
+        bubble.translatesAutoresizingMaskIntoConstraints = false
+        bubble.wantsLayer = true
+
+        let card = MacFilePreviewCardView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.configure(for: attachment)
+        card.onClick = { [weak self] url in
+            // Markdown gets the slide-up in-app editor for parity with link
+            // taps inside assistant replies. The other kinds (source, text,
+            // generic) hand off to the system handler — Preview, Xcode,
+            // Finder, whatever owns the UTI.
+            if attachment.kind == .markdown,
+               MarkdownEditorViewController.isMarkdownFile(url),
+               FileManager.default.fileExists(atPath: url.path) {
+                self?.presentMarkdownEditor(for: url)
+                return
+            }
+            NSWorkspace.shared.open(url)
+        }
+        bubble.addSubview(card)
+
+        let cardWidth: CGFloat = 240
+
+        var constraints: [NSLayoutConstraint] = [
+            card.topAnchor.constraint(equalTo: bubble.topAnchor),
+            card.leadingAnchor.constraint(equalTo: bubble.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: bubble.trailingAnchor),
+            card.widthAnchor.constraint(equalToConstant: cardWidth),
+        ]
+
+        if text.isEmpty {
+            constraints.append(card.bottomAnchor.constraint(equalTo: bubble.bottomAnchor))
+        } else {
+            let captionWrap = AdaptiveBubbleView()
+            captionWrap.translatesAutoresizingMaskIntoConstraints = false
+            captionWrap.wantsLayer = true
+            captionWrap.layer?.cornerRadius = 14
+            captionWrap.layer?.cornerCurve = .continuous
+            captionWrap.fillColor = isUser ? .systemBlue : .controlBackgroundColor
+
+            let caption = NSTextField(wrappingLabelWithString: text)
+            caption.translatesAutoresizingMaskIntoConstraints = false
+            caption.font = NSFont.systemFont(ofSize: 14)
+            caption.textColor = isUser ? .white : .labelColor
+            caption.isSelectable = true
+            captionWrap.addSubview(caption)
+            bubble.addSubview(captionWrap)
+
+            constraints += [
+                captionWrap.topAnchor.constraint(equalTo: card.bottomAnchor, constant: 6),
+                captionWrap.trailingAnchor.constraint(equalTo: bubble.trailingAnchor),
+                captionWrap.leadingAnchor.constraint(greaterThanOrEqualTo: bubble.leadingAnchor),
+                captionWrap.bottomAnchor.constraint(equalTo: bubble.bottomAnchor),
+
+                caption.topAnchor.constraint(equalTo: captionWrap.topAnchor, constant: 8),
+                caption.bottomAnchor.constraint(equalTo: captionWrap.bottomAnchor, constant: -8),
+                caption.leadingAnchor.constraint(equalTo: captionWrap.leadingAnchor, constant: 12),
+                caption.trailingAnchor.constraint(equalTo: captionWrap.trailingAnchor, constant: -12),
+            ]
+        }
+
+        NSLayoutConstraint.activate(constraints)
 
         // Right-align user bubbles in a containing row, matching makeBubble.
         let row = NSStackView()
@@ -1571,6 +1805,23 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
         return container
     }
 
+    /// Same row layout as `makeImageRow`, used for the generated PDF card
+    /// so it sits on the assistant side of the transcript. Wider cap
+    /// because the PDF card is horizontal (thumbnail + title block).
+    private func makePDFRow(bubbleView: PDFBubbleView) -> NSView {
+        bubbleView.translatesAutoresizingMaskIntoConstraints = false
+        let row = NSStackView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.addArrangedSubview(bubbleView)
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        row.addArrangedSubview(spacer)
+        bubbleView.widthAnchor.constraint(lessThanOrEqualToConstant: 420).isActive = true
+        return row
+    }
+
     /// Wrap an image bubble in the same left-aligned row layout
     /// `makeBubble(role:"assistant", …)` uses, so generated images sit on
     /// the assistant side of the conversation alongside text replies.
@@ -1587,6 +1838,22 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
         // Cap at the same width as the text + file-attachment bubbles for
         // visual consistency.
         bubbleView.widthAnchor.constraint(lessThanOrEqualToConstant: 380).isActive = true
+        return row
+    }
+
+    /// Wrap a map bubble in the same left-aligned row layout as image/PDF
+    /// bubbles. Maps sit on the assistant side alongside text replies.
+    private func makeMapRow(bubbleView: MapBubbleView) -> NSView {
+        bubbleView.translatesAutoresizingMaskIntoConstraints = false
+        let row = NSStackView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.addArrangedSubview(bubbleView)
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        row.addArrangedSubview(spacer)
+        bubbleView.widthAnchor.constraint(lessThanOrEqualToConstant: 420).isActive = true
         return row
     }
 
@@ -1900,6 +2167,244 @@ final class ClickableImageView: NSImageView {
     }
 }
 
+/// Mac counterpart of `FilePreviewCardView`: a click-to-open card showing
+/// icon + filename + (optional) language badge + subtitle + content
+/// snippet, used for markdown / source / text / generic attachments. Pinned
+/// to 240pt wide; height grows to fit the snippet.
+final class MacFilePreviewCardView: NSView {
+
+    var onClick: ((URL) -> Void)?
+
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let badgeLabel = NSTextField(labelWithString: "")
+    private let badgeContainer = NSView()
+    private let subtitleLabel = NSTextField(labelWithString: "")
+    private let snippetView = NSTextView()
+    private var fileURL: URL?
+
+    init() {
+        super.init(frame: .zero)
+        setup()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.borderWidth = 1
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        layer?.borderColor = NSColor.separatorColor.cgColor
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.contentTintColor = .secondaryLabelColor
+        iconView.setContentHuggingPriority(.required, for: .horizontal)
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        titleLabel.textColor = .labelColor
+        titleLabel.lineBreakMode = .byTruncatingMiddle
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        // Badge sits in its own container so we can give it padding + a
+        // background tint without subclassing NSTextField. The container's
+        // intrinsic size tracks the label's content.
+        badgeContainer.translatesAutoresizingMaskIntoConstraints = false
+        badgeContainer.wantsLayer = true
+        badgeContainer.layer?.cornerRadius = 3
+        badgeContainer.layer?.backgroundColor = NSColor.tertiaryLabelColor
+            .withAlphaComponent(0.18).cgColor
+        badgeContainer.setContentHuggingPriority(.required, for: .horizontal)
+        badgeContainer.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        badgeLabel.translatesAutoresizingMaskIntoConstraints = false
+        badgeLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold)
+        badgeLabel.textColor = .secondaryLabelColor
+        badgeLabel.alignment = .center
+        badgeContainer.addSubview(badgeLabel)
+
+        subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        subtitleLabel.font = NSFont.systemFont(ofSize: 10)
+        subtitleLabel.textColor = .secondaryLabelColor
+        subtitleLabel.lineBreakMode = .byTruncatingMiddle
+        subtitleLabel.maximumNumberOfLines = 1
+
+        // NSTextView so we can use an NSAttributedString from
+        // MarkdownSourceHighlighter directly. Disabled-but-not-selectable
+        // gives us "read-only" while still letting the wrapping container
+        // own the click — clicking inside the text view does not route to
+        // mouseDown on `self`, so we forward it explicitly below.
+        snippetView.translatesAutoresizingMaskIntoConstraints = false
+        snippetView.isEditable = false
+        snippetView.isSelectable = false
+        snippetView.drawsBackground = false
+        snippetView.textContainerInset = .zero
+        snippetView.textContainer?.lineFragmentPadding = 0
+        snippetView.textContainer?.maximumNumberOfLines = 8
+        snippetView.textContainer?.lineBreakMode = .byTruncatingTail
+
+        addSubview(iconView)
+        addSubview(titleLabel)
+        addSubview(badgeContainer)
+        addSubview(subtitleLabel)
+        addSubview(snippetView)
+
+        NSLayoutConstraint.activate([
+            iconView.widthAnchor.constraint(equalToConstant: 16),
+            iconView.heightAnchor.constraint(equalToConstant: 16),
+            iconView.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+
+            titleLabel.centerYAnchor.constraint(equalTo: iconView.centerYAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 6),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: badgeContainer.leadingAnchor, constant: -6),
+
+            badgeContainer.centerYAnchor.constraint(equalTo: iconView.centerYAnchor),
+            badgeContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+
+            badgeLabel.topAnchor.constraint(equalTo: badgeContainer.topAnchor, constant: 1),
+            badgeLabel.bottomAnchor.constraint(equalTo: badgeContainer.bottomAnchor, constant: -1),
+            badgeLabel.leadingAnchor.constraint(equalTo: badgeContainer.leadingAnchor, constant: 5),
+            badgeLabel.trailingAnchor.constraint(equalTo: badgeContainer.trailingAnchor, constant: -5),
+
+            subtitleLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 4),
+            subtitleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            subtitleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+
+            snippetView.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 8),
+            snippetView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            snippetView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            snippetView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -12),
+        ])
+
+        // Two competing bottom constraints — the snippet drives the height
+        // when it's visible; otherwise the subtitle (chip-like generic
+        // card) pulls the bottom up. Priorities pick the right one.
+        let bottomEqualSnippet = bottomAnchor.constraint(equalTo: snippetView.bottomAnchor, constant: 12)
+        bottomEqualSnippet.priority = .defaultHigh
+        bottomEqualSnippet.isActive = true
+        let bottomEqualSubtitle = bottomAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 12)
+        bottomEqualSubtitle.priority = .defaultLow
+        bottomEqualSubtitle.isActive = true
+    }
+
+    func configure(for attachment: FileAttachment) {
+        fileURL = attachment.fileURL
+        titleLabel.stringValue = attachment.fileName
+
+        let sizeText: String?
+        if let bytes = (try? attachment.fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) {
+            sizeText = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+        } else {
+            sizeText = nil
+        }
+
+        switch attachment.kind {
+        case .markdown:
+            iconView.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)
+            badgeLabel.stringValue = "MD"
+            badgeContainer.isHidden = false
+            subtitleLabel.stringValue = Self.subtitle("Markdown", size: sizeText)
+            applyMarkdownSnippet(attachment.extractedText ?? "")
+        case .text:
+            iconView.image = NSImage(systemSymbolName: "chevron.left.forwardslash.chevron.right", accessibilityDescription: nil)
+            if let lang = attachment.languageTag {
+                badgeLabel.stringValue = lang.uppercased()
+                badgeContainer.isHidden = false
+                subtitleLabel.stringValue = Self.subtitle(lang.capitalized, size: sizeText)
+            } else {
+                badgeContainer.isHidden = true
+                subtitleLabel.stringValue = Self.subtitle("Text", size: sizeText)
+            }
+            applyCodeSnippet(attachment.extractedText ?? "")
+        case .generic:
+            iconView.image = NSImage(systemSymbolName: "doc", accessibilityDescription: nil)
+            badgeContainer.isHidden = true
+            let mimeLabel: String
+            if attachment.mimeType == "application/octet-stream" {
+                let ext = attachment.fileURL.pathExtension
+                mimeLabel = ext.isEmpty ? "File" : ext.uppercased()
+            } else {
+                mimeLabel = attachment.mimeType
+            }
+            subtitleLabel.stringValue = Self.subtitle(mimeLabel, size: sizeText)
+            snippetView.string = ""
+            snippetView.isHidden = true
+        case .image, .pdf:
+            iconView.image = NSImage(systemSymbolName: "doc", accessibilityDescription: nil)
+            badgeContainer.isHidden = true
+            subtitleLabel.stringValue = Self.subtitle(attachment.mimeType, size: sizeText)
+            snippetView.isHidden = true
+        }
+    }
+
+    private func applyMarkdownSnippet(_ text: String) {
+        if text.isEmpty {
+            snippetView.string = ""
+            snippetView.isHidden = true
+            return
+        }
+        let snippet = Self.firstLines(text, count: 6)
+        guard let storage = snippetView.textStorage else {
+            snippetView.string = snippet
+            snippetView.isHidden = false
+            return
+        }
+        storage.beginEditing()
+        storage.setAttributedString(NSAttributedString(string: snippet))
+        storage.endEditing()
+        MarkdownSourceHighlighter.highlight(storage, baseSize: 11)
+        snippetView.isHidden = false
+    }
+
+    private func applyCodeSnippet(_ text: String) {
+        if text.isEmpty {
+            snippetView.string = ""
+            snippetView.isHidden = true
+            return
+        }
+        let snippet = Self.firstLines(text, count: 8)
+        let attributed = NSAttributedString(string: snippet, attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 10.5, weight: .regular),
+            .foregroundColor: NSColor.labelColor,
+        ])
+        snippetView.textStorage?.setAttributedString(attributed)
+        snippetView.isHidden = false
+    }
+
+    private static func firstLines(_ text: String, count: Int) -> String {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).prefix(count)
+        return lines.joined(separator: "\n")
+    }
+
+    private static func subtitle(_ label: String, size: String?) -> String {
+        guard let size = size else { return label }
+        return "\(label) · \(size)"
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let url = fileURL else {
+            super.mouseDown(with: event)
+            return
+        }
+        onClick?(url)
+    }
+
+    /// Re-derive the border colour through `cgColor` whenever the effective
+    /// appearance flips (light/dark), since CGColor on CALayer is static.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        layer?.borderColor = NSColor.separatorColor.cgColor
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        badgeContainer.layer?.backgroundColor = NSColor.tertiaryLabelColor
+            .withAlphaComponent(0.18).cgColor
+    }
+}
+
 // MARK: - Sub-agent inspector hook
 
 extension ConversationWindowController: SubAgentMacStatusBarDelegate {
@@ -1914,6 +2419,109 @@ extension ConversationWindowController: SubAgentMacStatusBarDelegate {
         // hands it a different id (or `nil` for unscoped fallback).
         let scope = tabs.indices.contains(activeTabIndex) ? tabs[activeTabIndex].conversation.id : nil
         SubAgentInspectorWindowController.shared.presentInFront(scopedTo: scope)
+    }
+}
+
+// MARK: - Onboarding host
+
+extension ConversationWindowController: OnboardingCoordinatorHost, MacOnboardingChipDelegate {
+
+    /// Coordinator → host: append a scripted assistant/user bubble into the
+    /// active tab's conversation. Surfaces the chat window so the user sees
+    /// the prompt — they may be focused on the recorder bar with the chat
+    /// minimized. The card kind goes into the `onboardingCards` sidecar
+    /// (keyed by message id) so the chip row re-renders after any future
+    /// `rebuild(messages:)` pass — the store doesn't serialize the card
+    /// enum itself.
+    func onboardingPostMessage(_ message: MessageStruct) {
+        guard let conv = tabs.indices.contains(activeTabIndex) ? tabs[activeTabIndex].conversation : nil else { return }
+        if let card = message.onboardingCard {
+            onboardingCards[message.id] = card
+        }
+        SimpleConversationManager.shared.addMessage(message, to: conv)
+        // Use the live-append path (not reloadFromStore) so we don't tear
+        // down + rebuild the entire stack on every chip turn. For
+        // onboarding-card assistant messages we route through the chip
+        // bubble; for everything else fall back to the existing append
+        // primitives so model attribution / scroll / surfacing behave
+        // identically to a regular turn.
+        if message.role == "assistant", let card = message.onboardingCard {
+            stack.addArrangedSubview(
+                MacOnboardingChipBubble.makeBubble(text: message.content,
+                                                  card: card,
+                                                  delegate: self))
+            scrollToBottom()
+            surfaceForOnboarding()
+        } else if message.role == "user" {
+            appendUserMessage(message.content)
+            surfaceForOnboarding()
+        } else if message.role == "assistant" {
+            appendAssistantMessage(message.content, model: nil)
+        }
+    }
+
+    /// Coordinator → host: flip a previously-posted bubble's chip row to
+    /// `.answered` so it collapses. We have to rebuild here (vs. mutating
+    /// the live view) because the bubble's chip row was constructed inside
+    /// `MacOnboardingChipBubble.makeBubble` and isn't reachable by id.
+    /// One rebuild per answer is cheap enough; the alternative would be to
+    /// hold weak refs to every bubble's chip container.
+    func onboardingMarkAnswered(messageId: String) {
+        onboardingCards[messageId] = .answered
+        reloadFromStore()
+    }
+
+    /// Coordinator → host: prefill the recorder bar's text field so the user
+    /// can edit-and-send the suggested default (e.g. "Loop" on the name
+    /// step). Bubbles up to the recorder via the public prefill method.
+    func onboardingPrefillMessageBox(_ text: String) {
+        recorder?.prefillInputText(text)
+    }
+
+    /// Coordinator → host: bring the recorder bar forward and focus its
+    /// text field. Called after the greeting so the user can immediately
+    /// type their name without first clicking the bar.
+    func onboardingFocusMessageBox() {
+        recorder?.focusInputField()
+    }
+
+    /// Coordinator → host: open the named integration's connect flow. Mac
+    /// has its own IntegrationsWindowController for this.
+    func onboardingRequestIntegration(_ kind: OnboardingIntegrationKind) {
+        IntegrationsWindowController.shared.show()
+    }
+
+    /// Coordinator → host: onboarding finished. Nothing platform-specific to
+    /// tear down — the next chat turn will go through the normal LLM path
+    /// because `OnboardingCoordinator.shared.handleUserText` early-returns
+    /// once `OnboardingState.isComplete`.
+    func onboardingDidComplete() {
+        // No-op.
+    }
+
+    /// Like `surfaceForResponse()` but without the activate-other-app dance,
+    /// because onboarding prompts post BEFORE the user has interacted (and
+    /// shouldn't yank focus from a non-Loop app the user might be in). Just
+    /// make sure the chat window is visible if it isn't already.
+    private func surfaceForOnboarding() {
+        guard let window = window else { return }
+        if !hasShown {
+            hasShown = true
+            window.center()
+        }
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        if !window.isVisible {
+            showWindow(nil)
+        }
+    }
+
+    // MARK: MacOnboardingChipDelegate
+
+    /// Chip tap → coordinator. The chip view doesn't know about the
+    /// coordinator directly; the window controller is the bridge so the
+    /// view stays focused on rendering.
+    func macOnboardingChipDidFire(_ event: OnboardingCardEvent) {
+        OnboardingCoordinator.shared.handleCardEvent(event)
     }
 }
 
@@ -2131,4 +2739,398 @@ extension ConversationWindowController: SlackSkillHost {
             completion(alert.runModal() == .alertFirstButtonReturn)
         }
     }
+}
+
+// MARK: - PDFSkillHost
+
+extension ConversationWindowController: PDFSkillHost {
+
+    /// Insert (or, on retry, refresh) a PDF card for a render that just
+    /// kicked off. Mirrors `imageSkillDidStartGenerating` — placeholder
+    /// message goes into the persistent store under id `pdf-<id>` so a
+    /// subsequent tab switch or window reload re-renders it.
+    func pdfSkillDidStartGenerating(_ attachment: PDFAttachment) {
+        pdfAttachments[attachment.id] = attachment
+
+        if let existing = pdfBubbles[attachment.id] {
+            existing.update(attachment: attachment)
+            if isPDFAttachmentForActiveTab(attachment) { surfaceForResponse() }
+            return
+        }
+
+        if let conversation = resolvePDFAttachmentConversation(attachment) {
+            let marker = MessageStruct(
+                id: "\(Self.pdfMessageIdPrefix)\(attachment.id)",
+                role: "assistant",
+                content: attachment.title,
+                model: "loop-pdf"
+            )
+            SimpleConversationManager.shared.addMessage(marker, to: conversation)
+        }
+
+        guard isPDFAttachmentForActiveTab(attachment) else { return }
+
+        let bubble = PDFBubbleView(attachment: attachment,
+                                   onPreview: { [weak self] att in self?.previewPDF(attachment: att) },
+                                   onShare:   { [weak self] att, sender in self?.sharePDF(attachment: att, from: sender) },
+                                   onRetry:   { [weak self] att in self?.retryPDF(attachment: att) })
+        pdfBubbles[attachment.id] = bubble
+        stack.addArrangedSubview(makePDFRow(bubbleView: bubble))
+        scrollToBottom()
+        surfaceForResponse()
+    }
+
+    func pdfSkillDidFinishGenerating(_ attachment: PDFAttachment) {
+        pdfAttachments[attachment.id] = attachment
+        if let bubble = pdfBubbles[attachment.id] {
+            bubble.update(attachment: attachment)
+        }
+    }
+
+    private func isPDFAttachmentForActiveTab(_ attachment: PDFAttachment) -> Bool {
+        guard let stamped = attachment.conversationId else { return true }
+        return stamped == activeTab?.conversation.id
+    }
+
+    private func resolvePDFAttachmentConversation(_ attachment: PDFAttachment) -> SimpleConversation? {
+        if let id = attachment.conversationId,
+           let conv = SimpleConversationManager.shared.getConversation(by: id) {
+            return conv
+        }
+        return SimpleConversationManager.shared.currentConversation
+    }
+}
+
+/// Inline assistant bubble for a generated PDF on Mac. Three states match
+/// the iOS PDF card:
+/// - `.generating` — spinner over a placeholder thumbnail + "Generating…"
+/// - `.ready` — page-1 thumbnail + title + page count + Preview / Share.
+/// - `.failed` — error text + Try again button that re-renders with the
+///   same id so this bubble gets refreshed.
+final class PDFBubbleView: NSView {
+    private(set) var attachment: PDFAttachment
+
+    private let onPreview: (PDFAttachment) -> Void
+    private let onShare: (PDFAttachment, NSView) -> Void
+    private let onRetry: (PDFAttachment) -> Void
+
+    private let card = NSView()
+    private let thumbnail = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let subtitleLabel = NSTextField(labelWithString: "")
+    private let spinner = NSProgressIndicator()
+    private let errorLabel = NSTextField(labelWithString: "")
+    private let previewButton = NSButton(title: "Preview", target: nil, action: nil)
+    private let shareButton = NSButton(title: "Share", target: nil, action: nil)
+    private let retryButton = NSButton(title: "Try again", target: nil, action: nil)
+
+    init(attachment: PDFAttachment,
+         onPreview: @escaping (PDFAttachment) -> Void,
+         onShare: @escaping (PDFAttachment, NSView) -> Void,
+         onRetry: @escaping (PDFAttachment) -> Void) {
+        self.attachment = attachment
+        self.onPreview = onPreview
+        self.onShare = onShare
+        self.onRetry = onRetry
+        super.init(frame: .zero)
+        configure()
+        update(attachment: attachment)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func configure() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.wantsLayer = true
+        card.layer?.cornerRadius = 12
+        card.layer?.borderWidth = 1
+        card.layer?.borderColor = NSColor.separatorColor.cgColor
+        card.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        addSubview(card)
+
+        thumbnail.translatesAutoresizingMaskIntoConstraints = false
+        thumbnail.imageScaling = .scaleProportionallyUpOrDown
+        thumbnail.wantsLayer = true
+        thumbnail.layer?.cornerRadius = 6
+        thumbnail.layer?.borderWidth = 0.5
+        thumbnail.layer?.borderColor = NSColor.separatorColor.cgColor
+        thumbnail.layer?.backgroundColor = NSColor.white.cgColor
+        card.addSubview(thumbnail)
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.maximumNumberOfLines = 2
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.cell?.wraps = true
+        card.addSubview(titleLabel)
+
+        subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        subtitleLabel.font = NSFont.systemFont(ofSize: 11)
+        subtitleLabel.textColor = .secondaryLabelColor
+        subtitleLabel.maximumNumberOfLines = 1
+        subtitleLabel.lineBreakMode = .byTruncatingTail
+        card.addSubview(subtitleLabel)
+
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isDisplayedWhenStopped = false
+        card.addSubview(spinner)
+
+        errorLabel.translatesAutoresizingMaskIntoConstraints = false
+        errorLabel.font = NSFont.systemFont(ofSize: 11)
+        errorLabel.textColor = .systemRed
+        errorLabel.maximumNumberOfLines = 3
+        errorLabel.cell?.wraps = true
+        errorLabel.isHidden = true
+        card.addSubview(errorLabel)
+
+        previewButton.bezelStyle = .rounded
+        previewButton.controlSize = .small
+        previewButton.target = self
+        previewButton.action = #selector(previewTapped)
+        previewButton.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(previewButton)
+
+        shareButton.bezelStyle = .rounded
+        shareButton.controlSize = .small
+        shareButton.target = self
+        shareButton.action = #selector(shareTapped)
+        shareButton.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(shareButton)
+
+        retryButton.bezelStyle = .rounded
+        retryButton.controlSize = .small
+        retryButton.target = self
+        retryButton.action = #selector(retryTapped)
+        retryButton.translatesAutoresizingMaskIntoConstraints = false
+        retryButton.isHidden = true
+        card.addSubview(retryButton)
+
+        let thumbW: CGFloat = 80
+        let thumbH: CGFloat = 104   // Letter aspect at width=80
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: topAnchor),
+            card.leadingAnchor.constraint(equalTo: leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: trailingAnchor),
+            card.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            thumbnail.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
+            thumbnail.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            thumbnail.widthAnchor.constraint(equalToConstant: thumbW),
+            thumbnail.heightAnchor.constraint(equalToConstant: thumbH),
+
+            titleLabel.leadingAnchor.constraint(equalTo: thumbnail.trailingAnchor, constant: 12),
+            titleLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
+            titleLabel.topAnchor.constraint(equalTo: thumbnail.topAnchor, constant: 2),
+
+            subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            subtitleLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+
+            spinner.centerXAnchor.constraint(equalTo: thumbnail.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: thumbnail.centerYAnchor),
+
+            errorLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            errorLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            errorLabel.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 4),
+
+            previewButton.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            previewButton.topAnchor.constraint(greaterThanOrEqualTo: subtitleLabel.bottomAnchor, constant: 10),
+            previewButton.topAnchor.constraint(greaterThanOrEqualTo: errorLabel.bottomAnchor, constant: 10),
+
+            shareButton.leadingAnchor.constraint(equalTo: previewButton.trailingAnchor, constant: 8),
+            shareButton.centerYAnchor.constraint(equalTo: previewButton.centerYAnchor),
+
+            retryButton.leadingAnchor.constraint(equalTo: previewButton.trailingAnchor, constant: 8),
+            retryButton.centerYAnchor.constraint(equalTo: previewButton.centerYAnchor),
+
+            card.bottomAnchor.constraint(greaterThanOrEqualTo: thumbnail.bottomAnchor, constant: 12),
+            card.bottomAnchor.constraint(greaterThanOrEqualTo: previewButton.bottomAnchor, constant: 12),
+        ])
+    }
+
+    func update(attachment: PDFAttachment) {
+        self.attachment = attachment
+        titleLabel.stringValue = attachment.title
+
+        switch attachment.status {
+        case .generating:
+            spinner.startAnimation(nil)
+            thumbnail.image = nil
+            thumbnail.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+            subtitleLabel.stringValue = "Generating PDF…"
+            errorLabel.isHidden = true
+            previewButton.isHidden = true
+            shareButton.isHidden = true
+            retryButton.isHidden = true
+        case .ready:
+            spinner.stopAnimation(nil)
+            thumbnail.layer?.backgroundColor = NSColor.white.cgColor
+            if let url = attachment.thumbnailURL,
+               let data = try? Data(contentsOf: url),
+               let image = NSImage(data: data) {
+                thumbnail.image = image
+            } else {
+                thumbnail.image = NSImage(systemSymbolName: "doc.richtext", accessibilityDescription: "PDF")
+                thumbnail.contentTintColor = .secondaryLabelColor
+            }
+            let pages = attachment.pageCount ?? 0
+            let pageWord = pages == 1 ? "page" : "pages"
+            let templateLabel = attachment.template.capitalized
+            subtitleLabel.stringValue = pages > 0
+                ? "\(pages) \(pageWord) · \(templateLabel)"
+                : templateLabel
+            errorLabel.isHidden = true
+            previewButton.isHidden = false
+            shareButton.isHidden = false
+            retryButton.isHidden = true
+        case .failed:
+            spinner.stopAnimation(nil)
+            thumbnail.image = NSImage(systemSymbolName: "doc.badge.ellipsis", accessibilityDescription: "PDF failed")
+            thumbnail.contentTintColor = .systemRed
+            thumbnail.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+            subtitleLabel.stringValue = "Couldn't generate PDF"
+            errorLabel.stringValue = attachment.failureReason ?? "Unknown error."
+            errorLabel.isHidden = false
+            previewButton.isHidden = true
+            shareButton.isHidden = true
+            retryButton.isHidden = false
+        }
+    }
+
+    @objc private func previewTapped() { onPreview(attachment) }
+    @objc private func shareTapped() { onShare(attachment, shareButton) }
+    @objc private func retryTapped() { onRetry(attachment) }
+}
+
+/// Inline assistant bubble for a map embed on Mac. Wraps an MKMapView with
+/// one pin per place; each pin's callout has an info button that hands the
+/// place to Apple Maps via `MKMapItem.openInMaps`.
+final class MapBubbleView: NSView {
+    private let attachment: MapAttachment
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let mapView = MKMapView()
+
+    init(attachment: MapAttachment) {
+        self.attachment = attachment
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+
+        let hasTitle = (attachment.title?.isEmpty == false)
+        if hasTitle {
+            titleLabel.translatesAutoresizingMaskIntoConstraints = false
+            titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+            titleLabel.stringValue = attachment.title ?? ""
+            titleLabel.maximumNumberOfLines = 2
+            titleLabel.lineBreakMode = .byTruncatingTail
+            addSubview(titleLabel)
+        }
+
+        mapView.translatesAutoresizingMaskIntoConstraints = false
+        mapView.wantsLayer = true
+        mapView.layer?.cornerRadius = 12
+        mapView.layer?.borderWidth = 1
+        mapView.layer?.borderColor = NSColor.separatorColor.cgColor
+        mapView.layer?.masksToBounds = true
+        mapView.delegate = MapBubbleViewDelegate.shared
+        mapView.register(MKMarkerAnnotationView.self,
+                         forAnnotationViewWithReuseIdentifier: MapBubbleView.pinReuseId)
+        addSubview(mapView)
+
+        let annotations: [MapPlaceAnnotation] = attachment.places.map {
+            MapPlaceAnnotation(place: $0)
+        }
+        mapView.addAnnotations(annotations)
+        mapView.showAnnotations(annotations, animated: false)
+
+        if hasTitle {
+            NSLayoutConstraint.activate([
+                titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+                titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+                titleLabel.topAnchor.constraint(equalTo: topAnchor),
+
+                mapView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                mapView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                mapView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 6),
+                mapView.bottomAnchor.constraint(equalTo: bottomAnchor),
+                mapView.heightAnchor.constraint(equalToConstant: 240),
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                mapView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                mapView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                mapView.topAnchor.constraint(equalTo: topAnchor),
+                mapView.bottomAnchor.constraint(equalTo: bottomAnchor),
+                mapView.heightAnchor.constraint(equalToConstant: 240),
+            ])
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    static let pinReuseId = "MapBubbleViewPin"
+}
+
+/// MKPointAnnotation that carries the underlying `MapPlace`, used by both
+/// iOS and macOS map renderers. Declared at file scope so the Mac bubble
+/// can share the iOS-side implementation's shape.
+final class MapPlaceAnnotation: MKPointAnnotation {
+    let place: MapPlace
+    init(place: MapPlace) {
+        self.place = place
+        super.init()
+        self.coordinate = CLLocationCoordinate2D(latitude: place.latitude,
+                                                 longitude: place.longitude)
+        self.title = place.name
+        self.subtitle = place.address
+    }
+}
+
+/// Shared MKMapViewDelegate for every MapBubbleView in the Mac window —
+/// stateless (the annotation carries the place data), so a single instance
+/// is safe and avoids retain cycles back into the bubble view.
+private final class MapBubbleViewDelegate: NSObject, MKMapViewDelegate {
+    static let shared = MapBubbleViewDelegate()
+
+    func mapView(_ mapView: MKMapView,
+                 viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+        guard annotation is MapPlaceAnnotation else { return nil }
+        let v = mapView.dequeueReusableAnnotationView(
+            withIdentifier: MapBubbleView.pinReuseId,
+            for: annotation) as? MKMarkerAnnotationView
+        v?.canShowCallout = true
+        v?.animatesWhenAdded = false
+        let button = NSButton(title: "Open in Maps", target: self,
+                              action: #selector(openInMaps(_:)))
+        button.bezelStyle = .rounded
+        button.controlSize = .small
+        v?.rightCalloutAccessoryView = button
+        // Stash the place on the button so the action handler can read it
+        // without a back-reference to the annotation view.
+        objc_setAssociatedObject(button,
+                                 &MapBubbleViewDelegate.placeAssocKey,
+                                 (annotation as? MapPlaceAnnotation)?.place,
+                                 .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        return v
+    }
+
+    @objc private func openInMaps(_ sender: NSButton) {
+        guard let place = objc_getAssociatedObject(
+                sender,
+                &MapBubbleViewDelegate.placeAssocKey) as? MapPlace else { return }
+        let placemark = MKPlacemark(coordinate: CLLocationCoordinate2D(
+            latitude: place.latitude, longitude: place.longitude))
+        let item = MKMapItem(placemark: placemark)
+        item.name = place.name
+        item.openInMaps(launchOptions: [
+            MKLaunchOptionsMapTypeKey: NSNumber(value: MKMapType.standard.rawValue)
+        ])
+    }
+
+    private static var placeAssocKey: UInt8 = 0
 }

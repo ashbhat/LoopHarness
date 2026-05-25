@@ -1,0 +1,159 @@
+@page {
+    size: Letter;
+    margin: 0.55in 0.65in 0.75in 0.65in;
+    @bottom-right {
+        content: counter(page) " / " counter(pages);
+        font-family: -apple-system, "Helvetica Neue", sans-serif;
+        font-size: 8.5pt;
+        color: #b0b0b0;
+    }
+    @top-left {
+        content: string(doc-title);
+        font-family: -apple-system, "Helvetica Neue", sans-serif;
+        font-size: 8.5pt;
+        color: #b0b0b0;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+}
+
+* { box-sizing: border-box; -webkit-print-color-adjust: exact; }
+
+html, body {
+    font-family: -apple-system, "Helvetica Neue", "Inter", sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.45;
+    color: #1d1d1f;
+    margin: 0;
+    padding: 0;
+}
+
+.doc-title { string-set: doc-title content(); }
+
+/* Notes has no cover — straight into the content. The `.cover` block is
+   collapsed to a tight title row at the top of page 1. */
+.cover {
+    padding: 0 0 14pt 0;
+    border-bottom: 1px solid rgba(29,29,31,0.12);
+    margin-bottom: 18pt;
+}
+.cover-eyebrow {
+    font-size: 9pt;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #8a8a8e;
+    margin: 0 0 4pt 0;
+    font-family: -apple-system, "Helvetica Neue", sans-serif;
+}
+.cover-title {
+    font-size: 22pt;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    color: #1d1d1f;
+    margin: 0;
+}
+.cover-meta {
+    font-size: 9pt;
+    color: #8a8a8e;
+    margin-top: 6pt;
+}
+.cover-meta .brand { display: none; }
+
+.body { padding: 0; }
+
+h2 {
+    font-size: 13pt;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+    color: #1d1d1f;
+    margin: 16pt 0 6pt 0;
+    padding-bottom: 3pt;
+    border-bottom: 1px solid rgba(29,29,31,0.15);
+    page-break-after: avoid;
+    break-after: avoid-page;
+}
+
+h3 {
+    font-size: 11pt;
+    font-weight: 700;
+    color: #2c2c2e;
+    margin: 12pt 0 3pt 0;
+}
+
+h4 {
+    font-size: 10pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6b6b70;
+    margin: 10pt 0 2pt 0;
+}
+
+p { margin: 0 0 6pt 0; orphans: 2; widows: 2; }
+
+ul, ol {
+    margin: 0 0 8pt 0;
+    padding-left: 18pt;
+}
+li { margin-bottom: 2pt; }
+li::marker { color: #ff8a3d; }
+
+blockquote {
+    margin: 8pt 0;
+    padding: 4pt 12pt;
+    border-left: 2px solid #ff8a3d;
+    color: #2c2c2e;
+    background: #fff5ec;
+    page-break-inside: avoid;
+    break-inside: avoid-page;
+}
+
+a { color: #b25400; text-decoration: none; border-bottom: 1px solid rgba(178,84,0,0.35); }
+
+hr { border: 0; border-top: 1px solid rgba(29,29,31,0.1); margin: 12pt 0; }
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8pt 0;
+    font-size: 9.5pt;
+    page-break-inside: avoid;
+    break-inside: avoid-page;
+}
+th, td {
+    border-bottom: 1px solid rgba(29,29,31,0.1);
+    padding: 4pt 6pt;
+    text-align: left;
+    vertical-align: top;
+}
+th {
+    font-size: 8.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6b6b70;
+    border-bottom: 1px solid rgba(29,29,31,0.3);
+}
+
+code {
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 9.5pt;
+    background: #f2f2f4;
+    padding: 1pt 4pt;
+    border-radius: 3pt;
+}
+pre {
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 9.5pt;
+    background: #f2f2f4;
+    padding: 8pt 10pt;
+    border-radius: 5pt;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+    page-break-inside: avoid;
+    break-inside: avoid-page;
+}
+pre code { background: transparent; padding: 0; }
+
+img { max-width: 100%; height: auto; border-radius: 4pt; }
+figure { margin: 8pt 0; page-break-inside: avoid; break-inside: avoid-page; }
+figcaption { font-size: 8.5pt; color: #6b6b70; margin-top: 3pt; }

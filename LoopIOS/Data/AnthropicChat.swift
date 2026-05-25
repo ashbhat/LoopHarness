@@ -172,7 +172,18 @@ final class AnthropicChat {
 
         func textBlock(_ s: String) -> [String: Any] { ["type": "text", "text": s] }
 
-        for m in messages {
+        // Drop synthetic UI-marker messages (image-/pdf- placeholders the
+        // chat surface inserts so it can render a thumbnail bubble). They
+        // carry no model-readable content and otherwise coalesce into the
+        // assistant turn between `tool_use` and its `tool_result`, which
+        // can trip the orphan-tool_use sanitizer below.
+        let filteredMessages = messages.filter { m in
+            guard m.role == "assistant" else { return true }
+            if m.id.hasPrefix("image-") || m.id.hasPrefix("pdf-") { return false }
+            return true
+        }
+
+        for m in filteredMessages {
             if m.role == "system" {
                 if !m.content.isEmpty { systemParts.append(m.content) }
                 continue

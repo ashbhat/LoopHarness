@@ -76,10 +76,25 @@ struct MessageStruct {
     /// flip status from .generating → .ready/.failed without rebuilding the
     /// whole message.
     var imageAttachment: ImageAttachment? = nil
+    /// Attached generated PDF, if any. Set by PDFSkill via PDFSkillHost so
+    /// the chat cell can render a thumbnail + page count + preview/share
+    /// buttons inline. Same .generating → .ready/.failed lifecycle as
+    /// `imageAttachment`.
+    var pdfAttachment: PDFAttachment? = nil
     /// User-uploaded image or PDF attached to this turn. Kept separate from
     /// `imageAttachment` so the ImageSkill output flow and the user-upload
     /// input flow can coexist on the same message in the future.
     var fileAttachment: FileAttachment? = nil
+    /// Map embed with pinned places, set by MapsSkill when the model calls
+    /// `show_places_on_map`. Cell renders an inline MKMapView with annotations
+    /// that callout to Apple Maps. Synchronous — no `.generating` lifecycle.
+    var mapAttachment: MapAttachment? = nil
+    /// Set when this message belongs to the conversational onboarding flow.
+    /// Drives `MessagingCell` to render an interactive card (text field,
+    /// choice buttons, key paste, etc.) under the message body. Onboarding
+    /// messages are filtered out of LLM context and suppressed from TTS so
+    /// the bootstrap script doesn't bleed into the real conversation.
+    var onboardingCard: OnboardingCardKind? = nil
 
     /// Explicit init that still accepts `function:` as a singular optional —
     /// keeps existing call sites compiling now that `function` is a computed
@@ -95,7 +110,10 @@ struct MessageStruct {
          actions: [MesssageActions] = [],
          polling_locations: [PollLocationStruct] = [],
          imageAttachment: ImageAttachment? = nil,
-         fileAttachment: FileAttachment? = nil) {
+         pdfAttachment: PDFAttachment? = nil,
+         fileAttachment: FileAttachment? = nil,
+         mapAttachment: MapAttachment? = nil,
+         onboardingCard: OnboardingCardKind? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -112,18 +130,24 @@ struct MessageStruct {
         self.actions = actions
         self.polling_locations = polling_locations
         self.imageAttachment = imageAttachment
+        self.pdfAttachment = pdfAttachment
         self.fileAttachment = fileAttachment
+        self.mapAttachment = mapAttachment
+        self.onboardingCard = onboardingCard
     }
 
     /// Generic JSON representation of the message. Provider-specific chat
     /// clients (`AnthropicChat`, `OpenAIChat`) build their own per-request
     /// payloads from `MessageStruct` fields directly and ignore the
-    /// `attachment`/`attachment_type` keys produced here.
+    /// `attachment`/`attachment_type` keys produced here. Only image / PDF
+    /// kinds inline their bytes — text-based kinds (markdown, source) ride
+    /// along via `assistantHint` and don't need a base64 payload.
     var dict: [String: Any] {
         var out: [String: Any] = ["role": role, "content": content]
         if let name = name { out["name"] = name }
         if let f = fileAttachment,
            f.status == .ready,
+           (f.kind == .image || f.kind == .pdf),
            let data = try? Data(contentsOf: f.fileURL) {
             out["attachment"] = data.base64EncodedString()
             out["attachment_type"] = (f.kind == .pdf) ? "PDF" : "JPEG"
@@ -141,6 +165,19 @@ struct FileAttachment: Codable {
     enum Kind: String, Codable, Equatable {
         case image
         case pdf
+        /// `.md` / `.markdown` and friends. Tap opens the in-app markdown
+        /// editor rather than QuickLook so the rendered Markdown styling
+        /// matches the rest of the app.
+        case markdown
+        /// Plain text or source code. `languageTag` distinguishes the two:
+        /// nil for a generic `.txt` / `.log` / `.csv`, a short identifier
+        /// like "swift" / "python" / "json" for a recognized source file.
+        case text
+        /// Catch-all for everything we can't preview inline (archives,
+        /// office docs, unknown MIME types). Renders as an icon+name+size
+        /// card; tap hands off to QuickLook which falls back to the system
+        /// handler when it can't display the file itself.
+        case generic
     }
 
     enum Status: String, Codable, Equatable {
@@ -157,12 +194,16 @@ struct FileAttachment: Codable {
     let fileName: String
     let kind: Kind
     let mimeType: String
+    /// For `.text` kind only: short lowercase language identifier ("swift",
+    /// "json", "python"). Drives the language badge in the preview card and
+    /// the `assistantHint` label. Nil for plain text / non-source kinds.
+    let languageTag: String?
     var status: Status
     var failureReason: String?
-    /// For PDFs: text extracted from the document at save time so the model
-    /// can read the contents inline. Truncated to a fixed cap (see
-    /// `MessageStruct.dict`) to keep the chat payload reasonable. Nil for
-    /// images — those need vision support on the backend to be useful.
+    /// For PDFs / markdown / text: text extracted from the document at save
+    /// time so the model can read the contents inline. Truncated to a fixed
+    /// cap (`extractedTextCharCap`) to keep the chat payload reasonable. Nil
+    /// for images (Vision OCR runs but may yield nothing) and `.generic`.
     var extractedText: String?
 
     init(id: String = UUID().uuidString,
@@ -170,6 +211,7 @@ struct FileAttachment: Codable {
          fileName: String,
          kind: Kind,
          mimeType: String,
+         languageTag: String? = nil,
          status: Status = .ready,
          failureReason: String? = nil,
          extractedText: String? = nil) {
@@ -178,6 +220,7 @@ struct FileAttachment: Codable {
         self.fileName = fileName
         self.kind = kind
         self.mimeType = mimeType
+        self.languageTag = languageTag
         self.status = status
         self.failureReason = failureReason
         self.extractedText = extractedText
@@ -195,7 +238,14 @@ struct FileAttachment: Codable {
     /// fenced markers so the model can answer questions about the file
     /// without needing a tool call.
     var assistantHint: String {
-        let kindLabel = (kind == .pdf) ? "PDF" : "image"
+        let kindLabel: String
+        switch kind {
+        case .pdf:      kindLabel = "PDF"
+        case .image:    kindLabel = "image"
+        case .markdown: kindLabel = "markdown"
+        case .text:     kindLabel = languageTag.map { "\($0) source" } ?? "text"
+        case .generic:  kindLabel = "file"
+        }
         let workspaceRelative = fileURL.lastPathComponent
         let header = "[Attached file: \(fileName) (\(kindLabel)) at workspace://attachments/\(workspaceRelative)]"
 
@@ -215,6 +265,57 @@ struct FileAttachment: Codable {
         \(truncated)
         [File content end]
         """
+    }
+}
+
+/// Inline PDF attached to an assistant chat message. Created in the
+/// .generating state when `generate_pdf` fires, then mutated in place to
+/// .ready (with fileURL, thumbnailURL, pageCount) or .failed (with reason)
+/// when PDFGenerationService finishes the render. The original `document`
+/// is held so retry can re-render without re-asking the model.
+struct PDFAttachment {
+    enum Status: Equatable {
+        case generating
+        case ready
+        case failed
+    }
+
+    let id: String
+    let title: String
+    let template: String
+    /// Source GFM markdown. Carried on the attachment so a retry from the
+    /// failed-state UI can re-run the same render without round-tripping
+    /// through the model.
+    let document: String
+    var fileURL: URL?
+    var thumbnailURL: URL?
+    var pageCount: Int?
+    var status: Status
+    var failureReason: String?
+    /// Conversation the render belongs to (mirrors `ImageAttachment` for
+    /// multi-tab Mac routing). Optional for single-tab callers.
+    let conversationId: String?
+
+    init(id: String = UUID().uuidString,
+         title: String,
+         template: String,
+         document: String,
+         fileURL: URL? = nil,
+         thumbnailURL: URL? = nil,
+         pageCount: Int? = nil,
+         status: Status = .generating,
+         failureReason: String? = nil,
+         conversationId: String? = nil) {
+        self.id = id
+        self.title = title
+        self.template = template
+        self.document = document
+        self.fileURL = fileURL
+        self.thumbnailURL = thumbnailURL
+        self.pageCount = pageCount
+        self.status = status
+        self.failureReason = failureReason
+        self.conversationId = conversationId
     }
 }
 
@@ -256,6 +357,85 @@ struct ImageAttachment {
     }
 }
 
+/// One place rendered as a pin on the inline map embed.
+struct MapPlace: Codable, Equatable {
+    let name: String
+    let latitude: Double
+    let longitude: Double
+    /// Optional street address — shown under the name in the callout and used
+    /// when handing the place off to Apple Maps so the destination sheet has a
+    /// human-readable label.
+    let address: String?
+
+    init(name: String, latitude: Double, longitude: Double, address: String? = nil) {
+        self.name = name
+        self.latitude = latitude
+        self.longitude = longitude
+        self.address = address
+    }
+}
+
+/// Inline map embed attached to a message by MapsSkill. The cell renders an
+/// MKMapView fitted to the place set with a callout per pin that deep-links
+/// into Apple Maps. Synchronous lifecycle — the model already supplies the
+/// coordinates, so there's no `.generating` state like images / PDFs.
+struct MapAttachment: Codable, Equatable {
+    let id: String
+    /// Optional caption shown above the map (e.g. "Coffee near you").
+    let title: String?
+    let places: [MapPlace]
+    var conversationId: String?
+
+    init(id: String = UUID().uuidString,
+         title: String? = nil,
+         places: [MapPlace],
+         conversationId: String? = nil) {
+        self.id = id
+        self.title = title
+        self.places = places
+        self.conversationId = conversationId
+    }
+}
+
+/// Interactive card rendered under an onboarding message in `MessagingCell`.
+/// The script (in `OnboardingCoordinator`) drives which card to attach to each
+/// turn; the cell switches on the case to build the right UI. Equatable so the
+/// table view can diff cells cheaply.
+enum OnboardingCardKind: Equatable {
+    /// Compact wrapping row of suggestion chips below the message text.
+    /// Tapping a chip fires `.choiceSelected(optionId:)`. Used for every
+    /// step that's just "pick one" — naming, model choice, integrations,
+    /// TTS, etc. The user can also type free text in the message bar to
+    /// answer without using the chips.
+    case suggestions(options: [OnboardingChoiceOption])
+    /// The rich action-button walkthrough: hero tile, mock Settings rows,
+    /// "Open Settings" + "Skip" chips. Visuals ported from the old modal.
+    /// Stays inline because the numbered Settings facsimile is information
+    /// the user needs while they're configuring iOS Settings.
+    case actionButtonWalkthrough
+    /// Sentinel marking an onboarding bubble whose user has already replied.
+    /// Renders nothing (just the prose stays). We swap the card to this
+    /// value instead of removing the bubble so scroll position is preserved
+    /// and the prompt remains in the transcript.
+    case answered
+}
+
+/// One option in a `.choices` card. `id` is the opaque identifier the
+/// coordinator switches on; `label` is what the user sees.
+struct OnboardingChoiceOption: Equatable {
+    let id: String
+    let label: String
+}
+
+/// Integrations offered during onboarding. Maps 1:1 to the existing connect
+/// flows in `IntegrationsVC`. Kept narrow on purpose — the long tail of
+/// integrations (Obsidian, Devin, etc.) lives in Settings for later.
+enum OnboardingIntegrationKind: String, Equatable {
+    case notion
+    case github
+    case slack
+}
+
 struct PollLocationStruct {
     var name: String
     var full_address: String
@@ -283,13 +463,16 @@ var tools: [[String: Any]] = {
     all += FileSystemSkill.tools
     all += SpecBuilderSkill.tools
     all += LocationSkill.tools
+    all += MapsSkill.tools
     all += ImageSkill.tools
+    all += PDFSkill.tools
     all += ObsidianSkill.tools
     all += CalendarSkill.tools
     all += MusicSkill.tools
     all += SkillBuilderSkill.tools
     all += SubAgentSkill.tools
     all += IntegrationSkill.tools
+    all += NavigationSkill.tools
     all += CursorSkill.tools
     all += DevinSkill.tools
     // Dynamic, user-authored skills get appended in AgentHarness at every

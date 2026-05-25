@@ -37,6 +37,9 @@ struct SimpleMessage: Codable {
     /// a user-uploaded attachment. Stored as a string so it rides alongside
     /// the other serialized fields without forcing a Core Data type change.
     let fileAttachment: String?
+    /// JSON-encoded `MapAttachment` (place pins). Nil unless MapsSkill ran
+    /// for this turn. Persisted so the inline map embed survives relaunch.
+    let mapAttachment: String?
     /// Which model produced the message — "GPT 5.5 Instant", "Apple LLM",
     /// etc. Optional for backward compatibility with NDJSON entries written
     /// before this field existed. When nil, callers default to whatever
@@ -52,6 +55,7 @@ struct SimpleMessage: Codable {
          functionArguments: String? = nil,
          actions: String? = nil,
          fileAttachment: String? = nil,
+         mapAttachment: String? = nil,
          model: String? = nil,
          createdAt: Date = Date()) {
         self.id = id
@@ -62,6 +66,7 @@ struct SimpleMessage: Codable {
         self.functionArguments = functionArguments
         self.actions = actions
         self.fileAttachment = fileAttachment
+        self.mapAttachment = mapAttachment
         self.model = model
         self.createdAt = createdAt
     }
@@ -173,6 +178,15 @@ class SimpleConversationManager {
             }
         }
 
+        // Serialize map embed (place pins) so it survives relaunch / sync.
+        var mapAttachmentString: String? = nil
+        if let attachment = messageStruct.mapAttachment {
+            if let data = try? JSONEncoder().encode(attachment),
+               let string = String(data: data, encoding: .utf8) {
+                mapAttachmentString = string
+            }
+        }
+
         let simpleMessage = SimpleMessage(
             id: messageStruct.id,
             role: messageStruct.role,
@@ -182,6 +196,7 @@ class SimpleConversationManager {
             functionArguments: functionArgumentsString,
             actions: actionsString,
             fileAttachment: fileAttachmentString,
+            mapAttachment: mapAttachmentString,
             // Persist model attribution so reload paths can show the same
             // "Apple LLM" / "GPT 5.5 Instant" badge that the live append
             // path renders. Only meaningful for assistant turns.
@@ -192,8 +207,26 @@ class SimpleConversationManager {
 
         // Refresh local snapshot of the current conversation so callers see the
         // appended message immediately without re-fetching.
-        if currentConversation?.id == conversation.id, let refreshed = store.conversation(id: conversation.id) {
-            _currentConversation = refreshed
+        let refreshed = store.conversation(id: conversation.id)
+        if currentConversation?.id == conversation.id, let fresh = refreshed {
+            _currentConversation = fresh
+        }
+
+        // Conversation-title auto-generation. Fires at the first real
+        // exchange (count == 2) so the placeholder "Chat 11/3, 4:02 PM"
+        // gets replaced quickly, then every 5 messages after to refresh
+        // the title as the topic drifts. Counted off user+assistant
+        // messages only — function calls/results and system seeds don't
+        // bump the milestone. ConversationTitleService dedupes by
+        // conversationId so two rapid `addMessage` calls inside the
+        // same milestone window won't double-fire.
+        if let fresh = refreshed {
+            let exchangeCount = fresh.messages.filter {
+                $0.role == "user" || $0.role == "assistant"
+            }.count
+            if ConversationTitleService.shouldTrigger(forUserAssistantCount: exchangeCount) {
+                ConversationTitleService.shared.regenerateFromPersisted(conversationId: conversation.id)
+            }
         }
     }
 
@@ -285,6 +318,12 @@ class SimpleConversationManager {
            let attachmentData = attachmentString.data(using: .utf8),
            let attachment = try? JSONDecoder().decode(FileAttachment.self, from: attachmentData) {
             messageStruct.fileAttachment = attachment
+        }
+
+        if let mapString = simpleMessage.mapAttachment,
+           let mapData = mapString.data(using: .utf8),
+           let map = try? JSONDecoder().decode(MapAttachment.self, from: mapData) {
+            messageStruct.mapAttachment = map
         }
 
         return messageStruct

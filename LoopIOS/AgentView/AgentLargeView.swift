@@ -24,7 +24,37 @@
 
 import UIKit
 
+/// Implemented by whoever can drive the existing MessageBox voice pipeline.
+/// `AgentLargeView` doesn't own its own STT — it just signals user intent and
+/// lets the host (MessagingVC, via its messageBox) actually record + send.
+/// This keeps the heavy `MessageBox` (~68KB, owns audio engine + waveform +
+/// attachments) out of the expanded view, while still letting the orb be a
+/// fully-functional voice surface.
+protocol AgentLargeViewVoiceDelegate: AnyObject {
+    /// Long-press began — start capturing mic input.
+    func agentLargeViewDidBeginVoice()
+    /// Long-press ended naturally — send what was captured.
+    func agentLargeViewDidEndVoice()
+    /// Long-press was interrupted (gesture cancelled, view dismissed) — drop
+    /// the recording without sending. Important so a half-captured phrase
+    /// doesn't fire off into the model on a stray gesture.
+    func agentLargeViewDidCancelVoice()
+    /// Current TTS mute state, so the speaker button in the agent view can
+    /// render the right icon (speaker.wave vs speaker.slash) without
+    /// duplicating the persistence layer.
+    func agentLargeViewIsMuted() -> Bool
+    /// Flip the TTS mute state and stop any in-flight speech immediately if
+    /// the user just muted. Mirrors the nav-bar speaker button so toggling
+    /// from either surface lands in the same place.
+    func agentLargeViewDidToggleMute()
+}
+
 final class AgentLargeView: UIView {
+
+    /// Whoever wants to receive press-and-hold voice events. Set by the host
+    /// controller before the view animates in.
+    weak var voiceDelegate: AgentLargeViewVoiceDelegate?
+
 
     /// Hero orb. Sized to dominate the upper half of the screen — same
     /// component used on the empty-state hero and the nav bar, just larger.
@@ -35,9 +65,47 @@ final class AgentLargeView: UIView {
     /// whether they're in chat or in large mode.
     private let statusLabel = UILabel()
 
-    /// Smaller pill above the orb — "tap to collapse". Keeps the affordance
-    /// discoverable without competing with the orb visually.
-    private let dismissHint = UILabel()
+    /// Small chevron-down above the orb. The whole sheet is drag-to-dismiss
+    /// (and tap-the-orb-to-dismiss), so the affordance is just a quiet visual
+    /// cue rather than a button — kept tertiary so it doesn't compete with
+    /// the orb.
+    private let dismissHint = UIImageView()
+
+    /// Top-right speaker toggle. Mirrors the nav-bar speaker button so the
+    /// user can flip TTS on/off without leaving the expanded view. State and
+    /// behavior are funnelled through `voiceDelegate` so this view stays
+    /// ignorant of how mute is persisted (iCloudKVS-backed bool, currently
+    /// owned by MessagingVC).
+    private let muteButton = UIButton(type: .system)
+
+    /// Scrollable rendering of the most recent assistant message. The orb +
+    /// status label show *what* is happening; the transcript shows *what
+    /// the model is actually saying* — important when the user has TTS
+    /// muted or has trouble parsing speech in a noisy room.
+    private let transcriptView = UITextView()
+
+    /// Press-and-hold capsule sitting above the sub-agent row. The expanded
+    /// view is voice-first, so the pill is the dominant input affordance —
+    /// hold to record, release to send. No tap behavior on purpose (text
+    /// composition still lives on the underlying MessagingVC's message box).
+    private let voicePill = UIView()
+    private let voicePillIcon = UIImageView()
+    private let voicePillLabel = UILabel()
+    /// Horizontal stack that holds the icon + label as one visual unit so
+    /// the pair stays centered inside the pill regardless of label width.
+    /// Without this, fixed leading/trailing constraints leave the icon
+    /// hugging the left edge while the label stretches into empty space —
+    /// the group reads as left-aligned even though the pill itself is
+    /// centered on screen.
+    private let voicePillContent = UIStackView()
+    /// Tracks whether the press-and-hold gesture is currently active so the
+    /// pill's appearance can flip without re-querying gesture state.
+    private var isVoicePillHeld = false {
+        didSet { applyVoicePillStyle() }
+    }
+    /// Haptic engine for the press/release edges. Lazy so we don't spin up
+    /// CoreHaptics for users who never touch the pill.
+    private let pressFeedback = UIImpactFeedbackGenerator(style: .medium)
 
     /// Vertical ticker of recent activity. We rebuild this from
     /// `AgentActivityLog.shared.entries` on every refresh; cap at
@@ -56,9 +124,10 @@ final class AgentLargeView: UIView {
     /// reads as the focal element. Sits behind everything.
     private let backdrop = CAGradientLayer()
 
-    /// How many ticker rows we keep on screen. More than this and the visual
-    /// hierarchy collapses — the orb stops dominating.
-    private let maxTickerLines = 6
+    /// How many ticker rows we keep on screen. Kept low so the transcript
+    /// view (which sits above the ticker) gets the lion's share of vertical
+    /// space — the ticker is supplementary, the transcript is primary.
+    private let maxTickerLines = 3
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -103,18 +172,19 @@ final class AgentLargeView: UIView {
         statusLabel.numberOfLines = 2
         statusLabel.adjustsFontSizeToFitWidth = true
         statusLabel.minimumScaleFactor = 0.8
-        statusLabel.text = "Idle"
+        statusLabel.text = "Press and hold to talk"
         addSubview(statusLabel)
 
         dismissHint.translatesAutoresizingMaskIntoConstraints = false
-        dismissHint.font = .systemFont(ofSize: 12, weight: .semibold)
-        dismissHint.textColor = .tertiaryLabel
-        dismissHint.textAlignment = .center
-        dismissHint.text = "TAP TO COLLAPSE"
-        // Subtle letter spacing — feels intentional rather than tossed in.
-        let attrs: [NSAttributedString.Key: Any] = [.kern: 1.6]
-        dismissHint.attributedText = NSAttributedString(string: dismissHint.text ?? "", attributes: attrs)
+        let chevronConfig = UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        dismissHint.image = UIImage(systemName: "chevron.compact.down", withConfiguration: chevronConfig)
+        dismissHint.tintColor = .tertiaryLabel
+        dismissHint.contentMode = .scaleAspectFit
         addSubview(dismissHint)
+
+        setupMuteButton()
+        setupTranscriptView()
+        setupVoicePill()
 
         tickerContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(tickerContainer)
@@ -151,13 +221,22 @@ final class AgentLargeView: UIView {
         subAgentScroll.addSubview(subAgentStack)
 
         NSLayoutConstraint.activate([
-            dismissHint.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 24),
+            dismissHint.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 18),
             dismissHint.centerXAnchor.constraint(equalTo: centerXAnchor),
+            dismissHint.heightAnchor.constraint(equalToConstant: 18),
+
+            muteButton.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 8),
+            muteButton.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            muteButton.widthAnchor.constraint(equalToConstant: 44),
+            muteButton.heightAnchor.constraint(equalToConstant: 44),
 
             avatar.centerXAnchor.constraint(equalTo: centerXAnchor),
-            // Orb sits in the upper third so the readout has room to breathe
-            // without the orb feeling lonely at the top.
-            avatar.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 80),
+            // The AvatarView draws its 25×25 grid from origin (0,0) at the
+            // configured pixelSize, so its content extents are exactly its
+            // intrinsicContentSize (300×300 here). Constraining to a smaller
+            // box clips the right/bottom edges of the grid and visually
+            // shifts the orb up-left — match the intrinsic so it centers.
+            avatar.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 64),
             avatar.widthAnchor.constraint(equalToConstant: 300),
             avatar.heightAnchor.constraint(equalToConstant: 300),
 
@@ -165,15 +244,42 @@ final class AgentLargeView: UIView {
             statusLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 32),
             statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -32),
 
-            tickerContainer.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 16),
+            transcriptView.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 12),
+            transcriptView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
+            transcriptView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
+            // The transcript is the dominant middle element — give it the
+            // bulk of the vertical slack between the orb and the ticker,
+            // but cap it so a long monologue doesn't crowd the pill.
+            transcriptView.heightAnchor.constraint(lessThanOrEqualToConstant: 220),
+
+            tickerContainer.topAnchor.constraint(equalTo: transcriptView.bottomAnchor, constant: 12),
             tickerContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
             tickerContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
-            tickerContainer.bottomAnchor.constraint(equalTo: subAgentScroll.topAnchor, constant: -16),
+            tickerContainer.bottomAnchor.constraint(equalTo: voicePill.topAnchor, constant: -16),
 
             tickerStack.bottomAnchor.constraint(equalTo: tickerContainer.bottomAnchor),
             tickerStack.leadingAnchor.constraint(equalTo: tickerContainer.leadingAnchor),
             tickerStack.trailingAnchor.constraint(equalTo: tickerContainer.trailingAnchor),
             tickerStack.topAnchor.constraint(greaterThanOrEqualTo: tickerContainer.topAnchor),
+
+            voicePill.centerXAnchor.constraint(equalTo: centerXAnchor),
+            voicePill.bottomAnchor.constraint(equalTo: subAgentScroll.topAnchor, constant: -16),
+            voicePill.heightAnchor.constraint(equalToConstant: 56),
+            voicePill.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
+            voicePill.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 32),
+            voicePill.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -32),
+
+            // Center the icon+label group as a unit. The stack hugs its
+            // content, so the pill auto-sizes around it; min width of 200
+            // (above) sets the floor so short labels don't collapse to a
+            // tiny capsule.
+            voicePillContent.centerXAnchor.constraint(equalTo: voicePill.centerXAnchor),
+            voicePillContent.centerYAnchor.constraint(equalTo: voicePill.centerYAnchor),
+            voicePillContent.leadingAnchor.constraint(greaterThanOrEqualTo: voicePill.leadingAnchor, constant: 20),
+            voicePillContent.trailingAnchor.constraint(lessThanOrEqualTo: voicePill.trailingAnchor, constant: -20),
+
+            voicePillIcon.widthAnchor.constraint(equalToConstant: 22),
+            voicePillIcon.heightAnchor.constraint(equalToConstant: 22),
 
             subAgentScroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             subAgentScroll.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -188,10 +294,192 @@ final class AgentLargeView: UIView {
         ])
     }
 
+    /// Build the press-and-hold capsule. Kept in its own helper so the main
+    /// `setupViews` reads as a layout outline rather than a wall of style.
+    private func setupVoicePill() {
+        voicePill.translatesAutoresizingMaskIntoConstraints = false
+        voicePill.layer.cornerRadius = 28
+        voicePill.layer.borderWidth = 1
+        voicePill.layer.borderColor = UIColor.separator.cgColor
+        voicePill.isUserInteractionEnabled = true
+        addSubview(voicePill)
+
+        voicePillIcon.contentMode = .scaleAspectFit
+        voicePillIcon.setContentHuggingPriority(.required, for: .horizontal)
+        voicePillIcon.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let micConfig = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+        voicePillIcon.image = UIImage(systemName: "mic.fill", withConfiguration: micConfig)
+
+        voicePillLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        voicePillLabel.textAlignment = .left
+        voicePillLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        voicePillContent.translatesAutoresizingMaskIntoConstraints = false
+        voicePillContent.axis = .horizontal
+        voicePillContent.alignment = .center
+        voicePillContent.spacing = 10
+        voicePillContent.isUserInteractionEnabled = false
+        voicePillContent.addArrangedSubview(voicePillIcon)
+        voicePillContent.addArrangedSubview(voicePillLabel)
+        voicePill.addSubview(voicePillContent)
+
+        // Long-press fires immediately on touch-down so the gesture feels
+        // like a button hold, not a delayed activation. The system default
+        // (0.5s) is far too slow for a press-to-talk affordance.
+        let press = UILongPressGestureRecognizer(target: self, action: #selector(handleVoicePressGesture(_:)))
+        press.minimumPressDuration = 0.05
+        press.allowableMovement = 60
+        voicePill.addGestureRecognizer(press)
+
+        applyVoicePillStyle()
+    }
+
+    /// Top-right speaker toggle. Visual style matches the nav-bar mute
+    /// button (medium-weight SF Symbol, secondaryLabel tint) so jumping
+    /// between the chat and the expanded view doesn't shift the user's
+    /// expectation of what "the speaker button" looks like.
+    private func setupMuteButton() {
+        muteButton.translatesAutoresizingMaskIntoConstraints = false
+        muteButton.tintColor = .secondaryLabel
+        muteButton.addTarget(self, action: #selector(handleMuteTapped), for: .touchUpInside)
+        addSubview(muteButton)
+        applyMuteButtonStyle()
+    }
+
+    /// Transcript view setup. UITextView (not UILabel) because we want
+    /// selection/copy for long replies and scrolling when the model
+    /// monologues past the available height.
+    private func setupTranscriptView() {
+        transcriptView.translatesAutoresizingMaskIntoConstraints = false
+        transcriptView.isEditable = false
+        transcriptView.isSelectable = true
+        transcriptView.isScrollEnabled = true
+        transcriptView.backgroundColor = .clear
+        transcriptView.textColor = .label
+        transcriptView.font = .systemFont(ofSize: 16, weight: .regular)
+        transcriptView.textAlignment = .center
+        transcriptView.textContainerInset = UIEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
+        transcriptView.textContainer.lineFragmentPadding = 0
+        transcriptView.showsVerticalScrollIndicator = false
+        addSubview(transcriptView)
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         backdrop.frame = bounds
         tickerMask.frame = tickerContainer.bounds
+    }
+
+    // MARK: - Voice pill
+
+    /// Pump the current voice coordinator state + held flag into the pill's
+    /// visual style. Called any time the held flag flips or the underlying
+    /// recording state changes — keeps the pill in sync without each call
+    /// site having to know every visual rule.
+    private func applyVoicePillStyle() {
+        let state = VoiceLoopCoordinator.shared.state
+        let isRecording = state == .recording
+        let tint: UIColor
+        let label: String
+        let textColor: UIColor
+        let icon: String
+        switch (isVoicePillHeld, isRecording, state) {
+        case (true, true, _), (true, _, _):
+            // User is actively holding — show "Recording…" even if the
+            // coordinator hasn't flipped to .recording yet (mic permission
+            // may still be resolving).
+            tint = .systemRed
+            icon = "waveform"
+            label = "Recording…"
+            textColor = .white
+        case (_, _, .thinking), (_, _, .transcribing):
+            tint = .secondarySystemBackground
+            icon = "ellipsis"
+            label = "Working…"
+            textColor = .label
+        case (_, _, .speaking):
+            tint = .secondarySystemBackground
+            icon = "speaker.wave.2.fill"
+            label = "Hold to interject"
+            textColor = .label
+        default:
+            tint = .secondarySystemBackground
+            icon = "mic.fill"
+            label = "Hold to talk"
+            textColor = .label
+        }
+        voicePill.backgroundColor = tint
+        voicePillLabel.text = label
+        voicePillLabel.textColor = textColor
+        voicePillIcon.tintColor = textColor
+        let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+        voicePillIcon.image = UIImage(systemName: icon, withConfiguration: config)
+    }
+
+    // MARK: - Mute button
+
+    /// Refresh the speaker icon from the delegate's current mute state.
+    /// Called on init, on stateDidChange, and right after the user taps it.
+    private func applyMuteButtonStyle() {
+        let muted = voiceDelegate?.agentLargeViewIsMuted() ?? false
+        let cfg = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+        let name = muted ? "speaker.slash" : "speaker.wave.2"
+        muteButton.setImage(UIImage(systemName: name, withConfiguration: cfg), for: .normal)
+        muteButton.accessibilityLabel = muted ? "Turn on voice playback" : "Turn off voice playback"
+    }
+
+    @objc private func handleMuteTapped() {
+        voiceDelegate?.agentLargeViewDidToggleMute()
+        applyMuteButtonStyle()
+    }
+
+    // MARK: - Transcript
+
+    /// Pump the latest assistant transcript from the activity log into the
+    /// text view. Falls back to hidden so the layout collapses gracefully
+    /// when nothing has been said yet (fresh conversation, first launch).
+    private func refreshTranscript() {
+        let text = AgentActivityLog.shared.assistantTranscript
+        let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            transcriptView.text = ""
+            transcriptView.isHidden = true
+        } else {
+            // Only push the text if it actually changed — avoids interrupting
+            // an in-progress selection or scroll position on every tool tick.
+            if transcriptView.text != trimmed {
+                transcriptView.text = trimmed
+                // Pin to the top so the user sees the start of a long reply.
+                transcriptView.setContentOffset(.zero, animated: false)
+            }
+            transcriptView.isHidden = false
+        }
+    }
+
+    /// Forward the press-and-hold lifecycle to the voice delegate. `.began`
+    /// fires immediately because we set `minimumPressDuration = 0.05`, so it
+    /// reads as a touch-down for users. `.ended` is the natural release —
+    /// send. `.cancelled` covers gesture interruptions (e.g. the system
+    /// reclaiming touches for a notification or the view being dismissed
+    /// mid-press) — drop without sending so a half-captured phrase doesn't
+    /// fire off.
+    @objc private func handleVoicePressGesture(_ gesture: UILongPressGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            isVoicePillHeld = true
+            pressFeedback.prepare()
+            pressFeedback.impactOccurred()
+            voiceDelegate?.agentLargeViewDidBeginVoice()
+        case .ended:
+            isVoicePillHeld = false
+            pressFeedback.impactOccurred(intensity: 0.6)
+            voiceDelegate?.agentLargeViewDidEndVoice()
+        case .cancelled, .failed:
+            isVoicePillHeld = false
+            voiceDelegate?.agentLargeViewDidCancelVoice()
+        default:
+            break
+        }
     }
 
     // MARK: - Observation
@@ -230,6 +518,8 @@ final class AgentLargeView: UIView {
     /// notification.
     func refresh(animated: Bool) {
         applyVoiceState()
+        refreshTranscript()
+        applyMuteButtonStyle()
         rebuildTicker(animated: animated)
         rebuildSubAgentChips()
     }
@@ -245,7 +535,12 @@ final class AgentLargeView: UIView {
         switch state {
         case .idle:
             mode = .idle
-            caption = AgentActivityLog.shared.entries.last?.summary ?? "Idle"
+            // Default to a hint that matches the pill's affordance. The
+            // most-recent activity entry would also be reasonable here, but
+            // it bleeds stale tool-call copy ("reading X.md") into the idle
+            // state long after the round-trip finished — confusing when the
+            // user just opened the expanded view fresh.
+            caption = "Press and hold to talk"
             tint = UIColor.label
         case .recording:
             mode = .listening
@@ -257,13 +552,24 @@ final class AgentLargeView: UIView {
             tint = .systemPurple
         case .thinking:
             mode = .thinking
-            // Prefer the most recent status string from the activity log so
-            // tool-running copy ("saving note to Notion") wins over a generic
-            // "Thinking…".
-            let recentStatus = AgentActivityLog.shared.entries.reversed().first { entry in
-                entry.kind == .status || entry.kind == .toolCall
-            }?.summary
-            caption = recentStatus ?? "Thinking…"
+            // Drive the caption off the currently-active tool set, not the
+            // entries log. The log is append-only — scanning it for "the last
+            // toolCall" sticks on the first call of a parallel batch even
+            // after that tool finishes and another is still running. The
+            // active set increments per dispatch and decrements per result,
+            // so the caption tracks real in-flight work.
+            let log = AgentActivityLog.shared
+            switch log.activeCallCount {
+            case 0:
+                caption = "Thinking…"
+            case 1:
+                caption = log.mostRecentActiveSummary ?? "Thinking…"
+            default:
+                let recent = log.mostRecentActiveSummary ?? ""
+                caption = recent.isEmpty
+                    ? "running \(log.activeCallCount) tools"
+                    : "running \(log.activeCallCount) tools\n\(recent)"
+            }
             tint = .systemPurple
         case .speaking:
             mode = .speaking
@@ -276,6 +582,7 @@ final class AgentLargeView: UIView {
             tint.withAlphaComponent(0.18).cgColor,
             UIColor.clear.cgColor
         ]
+        applyVoicePillStyle()
     }
 
     /// Pulls the last `maxTickerLines` entries off the activity log and
