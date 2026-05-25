@@ -115,11 +115,13 @@ final class KimiChat {
                 calls = []
             }
             let content = (message["content"] as? String) ?? ""
+            let reasoning = message["reasoning_content"] as? String
             let msg = MessageStruct(
                 role: "assistant",
                 content: content,
                 model: ModelSelectionStore.current.stampedMessageModel,
-                functions: calls)
+                functions: calls,
+                reasoningContent: reasoning)
             completion(msg, nil)
         }
         task.resume()

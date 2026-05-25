@@ -95,6 +95,11 @@ struct MessageStruct {
     /// messages are filtered out of LLM context and suppressed from TTS so
     /// the bootstrap script doesn't bleed into the real conversation.
     var onboardingCard: OnboardingCardKind? = nil
+    /// Provider-returned reasoning/thinking content for this assistant turn.
+    /// Kimi K2.6 returns `reasoning_content` alongside `tool_calls` when
+    /// thinking is enabled; the field must be replayed on subsequent requests
+    /// or the API rejects the message with "reasoning_content is missing".
+    var reasoningContent: String? = nil
 
     /// Explicit init that still accepts `function:` as a singular optional —
     /// keeps existing call sites compiling now that `function` is a computed
@@ -113,7 +118,8 @@ struct MessageStruct {
          pdfAttachment: PDFAttachment? = nil,
          fileAttachment: FileAttachment? = nil,
          mapAttachment: MapAttachment? = nil,
-         onboardingCard: OnboardingCardKind? = nil) {
+         onboardingCard: OnboardingCardKind? = nil,
+         reasoningContent: String? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -134,6 +140,7 @@ struct MessageStruct {
         self.fileAttachment = fileAttachment
         self.mapAttachment = mapAttachment
         self.onboardingCard = onboardingCard
+        self.reasoningContent = reasoningContent
     }
 
     /// Generic JSON representation of the message. Provider-specific chat
