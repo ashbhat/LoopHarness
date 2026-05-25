@@ -112,6 +112,14 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         else if url.scheme == "commandintel" && url.host == "share" {
             handleShareHandoff(url)
         }
+        // "Add to Loop" deep link from a website that hosts an MCP skill:
+        // commandintel://install/mcp?url=<server-url>. Opens Settings →
+        // Skills with the Add sheet pre-filled — the user pastes the token
+        // (if any) and confirms. Reusing the registered `commandintel`
+        // scheme avoids a Info.plist change for a one-tap install flow.
+        else if url.scheme == "commandintel" && url.host == "install" {
+            handleSkillInstall(url)
+        }
         // Files shared into the app via the system share sheet ("Copy to
         // Loop" / "Open in Loop"). iOS hands us a file:// URL that points
         // into the app's Documents/Inbox folder — copy it into the workspace
@@ -119,6 +127,38 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         else if url.isFileURL {
             handleSharedFile(url, openInPlace: URLContexts.first?.options.openInPlace ?? false)
         }
+    }
+
+    /// `commandintel://install/mcp?url=<server-url>` — push Settings →
+    /// Skills onto the nav stack with the Add sheet pre-filled. The path
+    /// component (`/mcp` vs. anything else) selects the installer; only
+    /// `/mcp` is supported for now.
+    private func handleSkillInstall(_ url: URL) {
+        guard url.path == "/mcp" else { return }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let serverURL = components.queryItems?.first(where: { $0.name == "url" })?.value,
+              !serverURL.isEmpty else {
+            return
+        }
+        guard let windowScene = window?.windowScene,
+              let window = windowScene.windows.first,
+              let root = window.rootViewController else { return }
+
+        let skills = SkillsVC(prefilledURL: serverURL)
+        let nav = UINavigationController(rootViewController: skills)
+        // Closure-based action so we don't have to expose an @objc dismisser
+        // on SkillsVC just for the deep-link path.
+        skills.navigationItem.leftBarButtonItem = UIBarButtonItem(
+            systemItem: .close,
+            primaryAction: UIAction { [weak nav] _ in
+                nav?.dismiss(animated: true)
+            }
+        )
+
+        // If we're already showing a modal, present on top of it; else from
+        // the root. Either way the user winds up looking at the Add sheet.
+        let presenter = root.presentedViewController ?? root
+        presenter.present(nav, animated: true)
     }
 
     /// URL handoff from the share extension. Reads the named file out of the

@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Loop — a personal AI that lives on your devices</title>
+<meta name="description" content="Loop is a personal AI for iPhone, Mac, and Vision Pro. It remembers you, uses your tools, and never routes through someone else's server. Open-source on GitHub." />
+<meta property="og:title" content="Loop — a personal AI that lives on your devices" />
+<meta property="og:description" content="A personal AI for Apple devices. Skills, memory, voice — local-first, with your own keys. Open-source." />
+<meta property="og:url" content="https://loopharness.com" />
+<meta property="og:type" content="website" />
+<meta name="theme-color" content="#0a0a0a" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ────────── HERO ────────── -->
+<header class="hero">
+  <nav class="nav nav--dark">
+    <a class="nav__brand" href="#">
+      <span class="nav__brand-orb"></span>
+      <span>Loop</span>
+    </a>
+    <div class="nav__links">
+      <a href="#surfaces">Surfaces</a>
+      <a href="#skills">Skills</a>
+      <a href="#memory">Memory</a>
+      <a href="#open-source">Open Source</a>
+      <a href="#download">Download</a>
+    </div>
+    <div class="nav__ctas">
+      <a class="nav__github" href="https://github.com/theashbhat/LoopHarness" target="_blank" rel="noreferrer">github&nbsp;↗</a>
+      <a class="nav__testflight" href="https://github.com/theashbhat/LoopHarness#setup" target="_blank" rel="noreferrer">Get the app</a>
+    </div>
+  </nav>
+
+  <div class="hero__vignette" aria-hidden="true"></div>
+
+  <div class="hero__stack">
+    <canvas class="hero__orb" data-orb="hero" aria-hidden="true"></canvas>
+
+    <div class="eyebrow eyebrow--hero">
+      <span>A personal AI · on your devices</span>
+      <span>with your keys</span>
+    </div>
+
+    <h1 class="hero__headline">
+      The assistant from sci-fi,<br />
+      made of real, inspectable parts.
+    </h1>
+
+    <p class="hero__lede">
+      Loop runs on your Mac, your phone, and your headset. It remembers you,
+      uses your tools, and never routes through someone else's server.
+    </p>
+
+    <div class="hero__ctas" id="download">
+      <a class="btn btn--primary" href="https://github.com/theashbhat/LoopHarness#setup">
+        Build for Mac
+      </a>
+      <a class="btn btn--ghost" href="https://github.com/theashbhat/LoopHarness#setup">
+        Build for iPhone
+      </a>
+    </div>
+  </div>
+
+  <div class="hold-strip" id="voice" data-hold>
+    <div class="hold-strip__key" data-hold-key>HOLD</div>
+    <div class="hold-strip__txt" data-hold-txt>press and hold to speak →</div>
+    <div class="hold-strip__dot" data-hold-dot></div>
+  </div>
+</header>
+
+<!-- ────────── SURFACES ────────── -->
+<section class="surfaces" id="surfaces">
+  <div class="surfaces__head">
+    <div>
+      <div class="eyebrow eyebrow--paper">01 / Surfaces</div>
+      <h2 class="surfaces__title">One conversation, present across every device you use.</h2>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Device surfaces">
+      <button class="tab is-active" role="tab" data-tab="ios">iPhone</button>
+      <button class="tab" role="tab" data-tab="mac">Mac</button>
+      <button class="tab" role="tab" data-tab="vision">Vision</button>
+    </div>
+  </div>
+
+  <div class="surfaces__stage">
+    <!-- copy column -->
+    <div class="surfaces__copy">
+      <div data-surface="ios" class="is-active">
+        <div class="eyebrow eyebrow--dark">iOS · tap or speak</div>
+        <h3>Walking between meetings.</h3>
+        <p>Open Loop. Speak. <em>"Start a sub-agent — research the three companies on my calendar today and leave me notes in Obsidian."</em> The agent runs in the background. A notification arrives when it's done.</p>
+      </div>
+      <div data-surface="mac">
+        <div class="eyebrow eyebrow--dark">macOS · push-to-talk</div>
+        <h3>At the desk, mid-task.</h3>
+        <p>Hold the hotkey. <em>"Add a pricing section to the doc I was editing last night — pull the numbers from the Q3 Plan in Notion."</em> Loop edits the doc and confirms back, out loud.</p>
+      </div>
+      <div data-surface="vision">
+        <div class="eyebrow eyebrow--dark">visionOS · ambient</div>
+        <h3>In the headset.</h3>
+        <p>An animated orb listens in the room. Ask it about your week. It answers as voice — calendar, mail, recent notes — with a soft visual response.</p>
+      </div>
+    </div>
+
+    <!-- device column -->
+    <div class="surfaces__device">
+
+      <!-- iPhone -->
+      <div class="phone is-active" data-surface="ios">
+        <div class="phone__screen">
+          <div class="phone__notch"></div>
+          <div class="phone__status">
+            <span>9:41</span>
+            <span class="phone__status-right">5G · 76</span>
+          </div>
+          <div class="phone__chrome">
+            <div class="phone__menu">≡</div>
+            <div class="phone__topright">
+              <div class="phone__settings"><span>⚙</span><span>♪</span></div>
+              <div class="phone__compose">✎</div>
+            </div>
+          </div>
+          <div class="phone__orb">
+            <canvas data-orb="phone" aria-hidden="true"></canvas>
+          </div>
+          <div class="phone__input">
+            <div class="phone__mic">🎙</div>
+            <div class="phone__field">
+              <span>Ask anything</span>
+              <span class="phone__attach">＋</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mac -->
+      <div class="mac" data-surface="mac">
+        <div class="mac__titlebar">
+          <span class="mac__dot mac__dot--red"></span>
+          <span class="mac__dot mac__dot--yellow"></span>
+          <span class="mac__dot mac__dot--green"></span>
+          <span class="mac__title">Loop</span>
+        </div>
+        <div class="mac__body">
+          <aside class="mac__sidebar">
+            <div class="mac__group">Today</div>
+            <div class="mac__item is-active">Q3 pricing edit</div>
+            <div class="mac__item">Calendar briefing</div>
+            <div class="mac__item">Research · 3 cos</div>
+            <div class="mac__group">Yesterday</div>
+            <div class="mac__item">Apple Health</div>
+            <div class="mac__item">Devin PR #14</div>
+          </aside>
+          <div class="mac__chat">
+            <div class="mac__bubble mac__bubble--user">
+              Add a pricing section to last night's doc. Pull numbers from Q3 Plan.
+            </div>
+            <div class="mac__bubble mac__bubble--assistant">
+              <canvas class="mac__assistant-orb" data-orb="mac-small" aria-hidden="true"></canvas>
+              <div>Found <span class="hl">Q3 Plan</span> in Notion. Inserting a pricing section in <span class="hl">pricing-draft.md</span>… done. Want me to read it back?</div>
+            </div>
+            <div class="mac__hint">
+              <span class="dot dot--amber"></span> listening — hold ⌥ to talk
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Vision -->
+      <div class="vision" data-surface="vision">
+        <div class="vision__orb">
+          <canvas data-orb="vision" aria-hidden="true"></canvas>
+        </div>
+        <div class="vision__label">LISTENING · AMBIENT</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ────────── SKILLS ────────── -->
+<section class="skills" id="skills">
+  <div class="skills__head">
+    <div class="eyebrow eyebrow--paper">02 / Skills</div>
+    <h2>It does work, not just chat.</h2>
+    <p>A growing library of <em>skills</em> — modular tools that let Loop act in the real world. New ones land regularly. Loop can also author its own.</p>
+  </div>
+  <div class="skills__grid">
+    <div class="skill"><span class="skill__mark"></span><span class="skill__name">Obsidian</span><div class="skill__desc">Read and write your vault</div></div>
+    <div class="skill"><span class="skill__mark"></span><span class="skill__name">Notion</span><div class="skill__desc">Query and update pages</div></div>
+    <div class="skill"><span class="skill__mark"></span><span class="skill__name">Calendar</span><div class="skill__desc">Read events and briefings</div></div>
+    <div class="skill"><span class="skill__mark"></span><span class="skill__name">Slack</span><div class="skill__desc">Channels, DMs, search</div></div>
+    <div class="skill"><span class="skill__mark"></span><span class="skill__name">GitHub</span><div class="skill__desc">Open PRs, comment, merge</div></div>
+    <div class="skill"><span class="skill__mark"></span><span class="skill__name">Apple Health</span><div class="skill__desc">Pull steps, sleep, distance</div></div>
+    <div class="skill"><span class="skill__mark"></span><span class="skill__name">Web · Exa</span><div class="skill__desc">Search and fetch the web</div></div>
+    <div class="skill"><span class="skill__mark"></span><span class="skill__name">Image</span><div class="skill__desc">Generate from prompts</div></div>
+    <div class="skill"><span class="skill__mark"></span><span class="skill__name">Scheduler</span><div class="skill__desc">Recurring background tasks</div></div>
+    <div class="skill"><span class="skill__mark"></span><span class="skill__name">Sub-agents</span><div class="skill__desc">Spawn research / coding</div></div>
+    <div class="skill"><span class="skill__mark"></span><span class="skill__name">Self-improvement</span><div class="skill__desc">Author its own skills</div></div>
+    <div class="skill"><span class="skill__mark"></span><span class="skill__name">File System</span><div class="skill__desc">Browse and edit workspace</div></div>
+  </div>
+  <div class="skills__foot">+ 12 more · or write your own by prompting Loop</div>
+</section>
+
+<!-- ────────── MEMORY ────────── -->
+<section class="memory" id="memory">
+  <div class="memory__copy">
+    <div class="eyebrow eyebrow--dark">03 / Memory</div>
+    <h2>A long-term memory, in plain Markdown.</h2>
+    <p>Loop maintains a memory store of who you are — your role, your projects, the people in your life, the way you like to be talked to. Every memory is a real file you can read, edit, or delete.</p>
+    <p class="memory__aside">Not a black box. Not a vector store you can't inspect. Markdown, on disk, on your machine.</p>
+  </div>
+  <div class="memory__file">
+    <div class="memory__path">~/loop/memory/user.md</div>
+    <div><span class="md-h">#</span> User</div>
+    <div class="md-h2"><span class="md-h">##</span> Role</div>
+    <div class="md-line">Founder, technical. Builds in Swift + Python.</div>
+    <div class="md-h2"><span class="md-h">##</span> Preferences</div>
+    <div class="md-line">- Terse answers by default. Expand only when asked.</div>
+    <div class="md-line">- Thursdays are no-meeting days.</div>
+    <div class="md-line">- "The client" means Mira at Northfield.</div>
+    <div class="md-h2"><span class="md-h">##</span> Active projects</div>
+    <div class="md-line">- LoopHarness · v0.4 ship</div>
+    <div class="md-line">- Q3 pricing exercise</div>
+    <div class="memory__stamp">—— last edited 4m ago, by Loop</div>
+  </div>
+</section>
+
+<!-- ────────── OPEN SOURCE ────────── -->
+<section class="oss" id="open-source">
+  <div class="eyebrow eyebrow--paper">04 / Open &amp; inspectable</div>
+  <div class="oss__grid">
+    <div class="oss__copy">
+      <h2>
+        Loop touches your calendar, your notes, your health.
+        <br /><span class="muted">You should be able to read what it's doing.</span>
+      </h2>
+      <p>
+        <strong>LoopHarness</strong> is the open-source runtime that powers Loop —
+        the agent loop, the skill system, the memory store, the voice pipeline.
+        Apache-2.0. No telemetry, no server.
+      </p>
+      <div class="oss__ctas">
+        <a class="btn btn--dark" href="https://github.com/theashbhat/LoopHarness" target="_blank" rel="noreferrer">
+          github.com/theashbhat/LoopHarness ↗
+        </a>
+        <a class="btn btn--outline" href="https://github.com/theashbhat/LoopHarness#architecture" target="_blank" rel="noreferrer">
+          Read the architecture →
+        </a>
+      </div>
+    </div>
+
+    <div class="repo">
+      <div class="repo__head">
+        <div class="repo__name">
+          <span class="repo__icon">⌥</span>
+          <span>theashbhat / LoopHarness</span>
+        </div>
+        <a class="repo__license" href="https://github.com/theashbhat/LoopHarness/blob/main/LICENSE" target="_blank" rel="noreferrer">Apache-2.0</a>
+      </div>
+      <div class="repo__desc">
+        Personal-AI runtime for iOS, macOS, and visionOS. Skill system, memory
+        store, voice pipeline, sub-agents.
+      </div>
+      <div class="repo__tree">
+        <div><span>📁 LoopIOS/AgentHarness</span><span>Swift</span></div>
+        <div><span>📁 LoopIOS/Skills</span><span>Swift</span></div>
+        <div><span>📁 LoopIOS/SubAgents</span><span>Swift</span></div>
+        <div><span>📁 LoopMac</span><span>Swift</span></div>
+        <div><span>📁 LoopVision</span><span>Swift</span></div>
+        <div><span>📁 LoopShare</span><span>Swift</span></div>
+        <div><span>📄 README.md</span><span>—</span></div>
+      </div>
+      <div class="repo__cmd">
+        $ git clone https://github.com/theashbhat/LoopHarness<br />
+        $ open Loop.xcodeproj
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ────────── FOOTER ────────── -->
+<footer class="foot">
+  <div class="foot__left">
+    <span class="foot__orb"></span>
+    <span class="foot__brand">Loop</span>
+    <span class="foot__by">© 2026 · made with care, in San Francisco</span>
+  </div>
+  <div class="foot__links">
+    <a href="#surfaces">iOS</a>
+    <a href="#surfaces">macOS</a>
+    <a href="#surfaces">visionOS</a>
+    <a href="https://github.com/theashbhat/LoopHarness" target="_blank" rel="noreferrer">GitHub</a>
+    <a href="https://github.com/theashbhat/LoopHarness/commits/main" target="_blank" rel="noreferrer">Changelog</a>
+  </div>
+</footer>
+
+<script src="orb.js" defer></script>
+<script src="site.js" defer></script>
+</body>
+</html>

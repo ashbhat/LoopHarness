@@ -91,6 +91,7 @@
 				Settings/KeysVC.swift,
 				Settings/ModelPickerVC.swift,
 				Settings/SettingsVC.swift,
+				Settings/SkillsVC.swift,
 				SideDrawerViewController.swift,
 				SpeechPipeline/EarconPlayer.swift,
 				SpeechPipeline/VoiceLoopCoordinator.swift,
@@ -128,6 +129,7 @@
 				Settings/KeysVC.swift,
 				Settings/ModelPickerVC.swift,
 				Settings/SettingsVC.swift,
+				Settings/SkillsVC.swift,
 				SideDrawerViewController.swift,
 				TriggerIntent.swift,
 			);

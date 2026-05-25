@@ -193,6 +193,14 @@ final class AgentHarness {
             self?.refreshDynamicSkills()
         }
         DynamicSkillRegistry.shared.reload()
+
+        // Same plumbing for remote MCP servers the user has installed. We
+        // share `refreshDynamicSkills` because both registries land in the
+        // same trailing section of `toolSchemas` / `toolsDoc`.
+        MCPRegistry.shared.didReload = { [weak self] in
+            self?.refreshDynamicSkills()
+        }
+
         refreshDynamicSkills()
 
         // Resume polling any Cursor cloud agents dispatched in a prior
@@ -241,6 +249,14 @@ final class AgentHarness {
                 : toolsDoc + "\n\n" + fragment
         }
         toolSchemas.append(contentsOf: DynamicSkillRegistry.shared.toolSchemas())
+
+        let mcpFragment = MCPRegistry.shared.systemPromptFragment()
+        if !mcpFragment.isEmpty {
+            toolsDoc = toolsDoc.isEmpty
+                ? mcpFragment
+                : toolsDoc + "\n\n" + mcpFragment
+        }
+        toolSchemas.append(contentsOf: MCPRegistry.shared.toolSchemas())
     }
 
     /// Collapse tool schemas to one entry per function name, first-wins.
@@ -335,6 +351,14 @@ final class AgentHarness {
         // Same for user-authored skills — if the user dropped a new skill
         // folder into Workspace/Skills/ since the last turn, see it now.
         DynamicSkillRegistry.shared.reload()
+        // And remote MCP servers — re-fetch tools/list off the network so
+        // catalog changes on the server side show up without a relaunch.
+        // The call hops onto its own queue and a stale catalog just lingers
+        // for one more turn if the network is slow, matching the dynamic
+        // registry's "next turn at the latest" contract.
+        DispatchQueue.global(qos: .userInitiated).async {
+            MCPRegistry.shared.reload()
+        }
 
         // Two reasons to take the offline (Apple Foundation) path:
         //   1. The device is offline — the cloud is unreachable, so no other
