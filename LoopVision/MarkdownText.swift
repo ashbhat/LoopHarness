@@ -130,8 +130,8 @@ private struct MarkdownCodeBlockView: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            Text(block.code)
-                .font(.system(.subheadline, design: .monospaced))
+            Text(CodeSyntaxHighlighter.highlightedAttributedString(
+                block.code, language: block.language, fontSize: 13))
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
