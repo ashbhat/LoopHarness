@@ -23,12 +23,11 @@ You can manage the user's Obsidian vault through this set of tools:
 - update_obsidian_note: overwrite or append to an existing note. `mode` = "overwrite" (default) or "append".
 - delete_obsidian_note: remove a note by path.
 - move_obsidian_note: move/rename a note (`from`, `to`).
-- find_obsidian_notes: full-text search; returns matches with short context snippets.
+- find_obsidian: search the vault. Pass `kind`: "notes" (default — full-text search of note contents, returns matches with snippets) or "folders" (substring match on folder names). For "folders", optional `root` limits the search and `max_depth` caps recursion. For both, `context_length` controls snippet size for note matches.
 - list_obsidian_folder: list files + subfolders at a path. Empty path = vault root.
 - create_obsidian_folder: create a folder at a path (idempotent).
 - delete_obsidian_folder: delete a folder. Pass `recursive: true` to wipe contents.
 - move_obsidian_folder: move/rename a folder.
-- find_obsidian_folders: search folder names.
 - get_obsidian_layout: nested tree of the vault (or a subtree). Use to orient yourself before bulk edits.
 - get_obsidian_today: returns today's day-folder path so you can build paths relative to it.
 
@@ -159,18 +158,31 @@ Workflow tips:
         [
             "type": "function",
             "function": [
-                "name": "find_obsidian_notes",
-                "description": "Full-text search across the vault. Returns matches with short context snippets.",
+                "name": "find_obsidian",
+                "description": "Search the vault. `kind: \"notes\"` (default) runs full-text search across note contents and returns matches with short snippets. `kind: \"folders\"` searches folder names by substring under an optional `root`.",
                 "parameters": [
                     "type": "object",
                     "properties": [
                         "query": [
                             "type": "string",
-                            "description": "Search query — matched against note contents."
+                            "description": "Search query. For notes: matched against contents. For folders: case-insensitive substring match against folder names."
+                        ],
+                        "kind": [
+                            "type": "string",
+                            "description": "What to search. Default \"notes\".",
+                            "enum": ["notes", "folders"]
+                        ],
+                        "root": [
+                            "type": "string",
+                            "description": "Folders only: optional vault-relative folder to limit the search to."
+                        ],
+                        "max_depth": [
+                            "type": "integer",
+                            "description": "Folders only: max recursion depth from `root`."
                         ],
                         "context_length": [
                             "type": "integer",
-                            "description": "Optional snippet length (chars)."
+                            "description": "Notes only: snippet length (chars)."
                         ]
                     ],
                     "required": ["query"]
@@ -253,31 +265,6 @@ Workflow tips:
         [
             "type": "function",
             "function": [
-                "name": "find_obsidian_folders",
-                "description": "Search folder names by query under an optional root.",
-                "parameters": [
-                    "type": "object",
-                    "properties": [
-                        "query": [
-                            "type": "string",
-                            "description": "Substring matched against folder names (case-insensitive)."
-                        ],
-                        "root": [
-                            "type": "string",
-                            "description": "Optional vault-relative folder to limit the search to."
-                        ],
-                        "max_depth": [
-                            "type": "integer",
-                            "description": "Optional max recursion depth from `root`."
-                        ]
-                    ],
-                    "required": ["query"]
-                ]
-            ]
-        ],
-        [
-            "type": "function",
-            "function": [
                 "name": "get_obsidian_layout",
                 "description": "Return a nested layout tree of the vault under `root` up to `max_depth`.",
                 "parameters": [
@@ -317,12 +304,11 @@ Workflow tips:
         "update_obsidian_note",
         "delete_obsidian_note",
         "move_obsidian_note",
-        "find_obsidian_notes",
+        "find_obsidian",
         "list_obsidian_folder",
         "create_obsidian_folder",
         "delete_obsidian_folder",
         "move_obsidian_folder",
-        "find_obsidian_folders",
         "get_obsidian_layout",
         "get_obsidian_today"
     ]
@@ -348,11 +334,15 @@ Workflow tips:
             return "deleting Obsidian note"
         case "move_obsidian_note":
             return "moving Obsidian note"
-        case "find_obsidian_notes":
-            if let q = call.arguments["query"] as? String, !q.isEmpty {
-                return "searching Obsidian for \(q)"
+        case "find_obsidian":
+            let kind = (call.arguments["kind"] as? String)?.lowercased() ?? "notes"
+            let q = call.arguments["query"] as? String ?? ""
+            switch kind {
+            case "folders":
+                return q.isEmpty ? "searching Obsidian folders" : "searching Obsidian folders for \(q)"
+            default:
+                return q.isEmpty ? "searching Obsidian" : "searching Obsidian for \(q)"
             }
-            return "searching Obsidian"
         case "list_obsidian_folder":
             return "browsing Obsidian"
         case "create_obsidian_folder":
@@ -361,8 +351,6 @@ Workflow tips:
             return "deleting Obsidian folder"
         case "move_obsidian_folder":
             return "moving Obsidian folder"
-        case "find_obsidian_folders":
-            return "searching Obsidian folders"
         case "get_obsidian_layout":
             return "mapping your Obsidian vault"
         case "get_obsidian_today":
@@ -446,13 +434,23 @@ Workflow tips:
                 ObsidianSkill.respond(name: name, json: json, error: error, errorPrefix: "I couldn't move that Obsidian note.", completion: completion)
             }
 
-        case "find_obsidian_notes":
+        case "find_obsidian":
             guard let query = args["query"] as? String else {
                 completion(missingArgs(for: name, expected: "query")); return
             }
-            let ctx = ObsidianSkill.intArg(args["context_length"])
-            ObsidianClient.shared.findNotes(query: query, contextLength: ctx) { json, error in
-                ObsidianSkill.respond(name: name, json: json, error: error, errorPrefix: "I couldn't search Obsidian.", completion: completion)
+            let kind = ((args["kind"] as? String) ?? "notes").lowercased()
+            switch kind {
+            case "folders":
+                let root = args["root"] as? String
+                let depth = ObsidianSkill.intArg(args["max_depth"])
+                ObsidianClient.shared.findFolders(query: query, root: root, maxDepth: depth) { json, error in
+                    ObsidianSkill.respond(name: name, json: json, error: error, errorPrefix: "I couldn't search Obsidian folders.", completion: completion)
+                }
+            default:
+                let ctx = ObsidianSkill.intArg(args["context_length"])
+                ObsidianClient.shared.findNotes(query: query, contextLength: ctx) { json, error in
+                    ObsidianSkill.respond(name: name, json: json, error: error, errorPrefix: "I couldn't search Obsidian.", completion: completion)
+                }
             }
 
         case "list_obsidian_folder":
@@ -485,16 +483,6 @@ Workflow tips:
             }
             ObsidianClient.shared.moveFolder(from: from, to: to) { json, error in
                 ObsidianSkill.respond(name: name, json: json, error: error, errorPrefix: "I couldn't move that Obsidian folder.", completion: completion)
-            }
-
-        case "find_obsidian_folders":
-            guard let query = args["query"] as? String else {
-                completion(missingArgs(for: name, expected: "query")); return
-            }
-            let root = args["root"] as? String
-            let depth = ObsidianSkill.intArg(args["max_depth"])
-            ObsidianClient.shared.findFolders(query: query, root: root, maxDepth: depth) { json, error in
-                ObsidianSkill.respond(name: name, json: json, error: error, errorPrefix: "I couldn't search Obsidian folders.", completion: completion)
             }
 
         case "get_obsidian_layout":

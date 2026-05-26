@@ -505,7 +505,7 @@ file_write — those are loaded into every system prompt automatically.
             if fm.fileExists(atPath: url.path) {
                 try Workspace.shared.ensureDownloaded(url)
                 if !FileSystemSkill.isTextExtension(url.pathExtension) {
-                    return ["status": "error", "error": "file_append only works on text files"]
+                    return ["status": "error", "error": "file_write mode \"append\" only works on text files"]
                 }
                 existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             }

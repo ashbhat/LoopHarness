@@ -1597,7 +1597,7 @@ Workflow tips:
         case 404:
             return "Either the resource doesn't exist or the PAT can't see it (private repo without `contents:read`). Confirm owner/repo/number, then verify the PAT's repo access."
         case 409:
-            return "Conflict — for a merge this typically means the PR isn't mergeable yet (failing required checks, unresolved review threads, or stale base). Read pull_request_checks / get_pull_request first."
+            return "Conflict — for a merge this typically means the PR isn't mergeable yet (failing required checks, unresolved review threads, or stale base). Call get_pull_request with include=[\"checks\"] first."
         case 422:
             return "GitHub rejected the request shape. For review_pull_request this often means the author tried to approve their own PR — switch to comment_pull_request. For create_pull_request, check that head/base exist."
         case 429:

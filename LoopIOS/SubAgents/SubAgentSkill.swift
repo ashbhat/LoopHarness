@@ -25,7 +25,7 @@ If the user asks you to write, edit, generate, refactor, or scaffold any code
 (or any other "make me a thing" task — scripts, configs, snippets, etc.),
 spawn a sub-agent with `kind: "coding"` instead of writing the code yourself.
 This applies to:
-- Any call to `file_write`, `file_edit`, `file_append` on a code file.
+- Any call to `file_write` (write or append mode) or `file_edit` on a code file.
 - Any `run_terminal_command` that builds, tests, lints, formats, or runs code.
 - Any "draft me a function / module / config / Dockerfile / SQL" request,
   no matter how short.

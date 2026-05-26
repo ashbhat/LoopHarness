@@ -115,6 +115,8 @@
 	</array>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Loop reads your Health data (steps, distance, workouts, heart rate, sleep) so the assistant can answer questions about your activity and wellness. Your data stays on device and is never sent to analytics.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Loop does not write to Health. This key is present only because the HealthKit framework requires it; the app never requests write access.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Loop transcribes the voice messages you record so you can talk to the assistant. When you pick Apple in Settings ▸ Model ▸ STT, transcription happens entirely on this device.</string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>

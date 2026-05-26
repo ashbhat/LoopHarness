@@ -152,6 +152,14 @@ final class OnboardingCoordinator {
     /// callbacks synchronously.
     private var isAdvancing = false
 
+    /// True between firing `extractName(...)` for the `.askName` step and that
+    /// extraction's completion landing. Used to swallow follow-up messages the
+    /// user sends while the model is still resolving the first reply — without
+    /// this guard, a second send races the first and overwrites the name
+    /// (e.g. user types "Loop", then impatiently types "did that work?"; the
+    /// second message would otherwise become the assistant's name).
+    private var isExtractingName = false
+
     private init() {}
 
     // MARK: - Public entry points
@@ -276,10 +284,28 @@ final class OnboardingCoordinator {
             // Buddy" or "How about Loop?" resolve to just the name. The
             // model was already set up in step 1, so a single short prompt
             // here is cheap and honors the user's provider pick.
+            //
+            // If an extraction is already in flight, echo the user's message
+            // so they can see it was received but skip kicking off a second
+            // resolution — the first reply still wins and gets to name the
+            // assistant. Without this, an impatient follow-up ("did that
+            // work?") races the first call and the late completion clobbers
+            // the chosen name + re-posts the greeting.
+            if isExtractingName {
+                echoUser(trimmed)
+                return true
+            }
             commitAnswer(echo: trimmed)
+            isExtractingName = true
             extractName(from: trimmed) { [weak self] name in
+                guard let self = self else { return }
+                self.isExtractingName = false
+                // Belt-and-suspenders: if anything else has already advanced
+                // us past .askName (e.g. a chip tap raced the model reply),
+                // don't overwrite the name or re-fire `.done` from here.
+                guard self.currentStep == .askName else { return }
                 OnboardingState.assistantName = name
-                self?.advance(to: .done)
+                self.advance(to: .done)
             }
 
         case .keyPaste:
