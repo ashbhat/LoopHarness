@@ -20,10 +20,50 @@
 //
 
 import Foundation
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 /// Top-level provider grouping. Drives the Mac menu's submenus and the
 /// AgentHarness routing switch.
 enum ModelProvider: String, CaseIterable {
+
+    /// Whether Apple's on-device Foundation model is usable on this
+    /// device/OS. Returns `false` on pre-iOS 26, when Apple Intelligence
+    /// is disabled, or when the model hasn't finished downloading.
+    static var isAppleFoundationAvailable: Bool {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, macOS 26.0, *) {
+            if case .available = SystemLanguageModel.default.availability {
+                return true
+            }
+        }
+        #endif
+        return false
+    }
+
+    /// The highest-priority provider that already has a usable API key in
+    /// the Keychain. Returns `nil` when no hosted provider is configured.
+    static var firstKeyedProvider: ModelProvider? {
+        let ranked: [(ModelProvider, KeyStore.Key)] = [
+            (.anthropic, .anthropic),
+            (.openAI, .openAI),
+            (.kimi, .kimi),
+            (.fireworks, .fireworks),
+        ]
+        for (provider, key) in ranked {
+            if KeyStore.shared.source(for: key) != .missing {
+                return provider
+            }
+        }
+        return nil
+    }
+
+    /// `true` when at least one hosted-provider API key is configured.
+    static var hasAnyProviderKey: Bool {
+        firstKeyedProvider != nil
+    }
+
     case apple
     case openAI
     case anthropic

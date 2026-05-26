@@ -21,9 +21,11 @@ final class ModelPickerVC: UIViewController {
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
 
     /// Providers that actually have at least one model, in `ModelProvider`
-    /// order. Computed once: the model catalog is static for the app's life.
-    private let providers: [ModelProvider] = ModelProvider.allCases.filter {
-        !ModelSelection.models(for: $0).isEmpty
+    /// order. Apple is excluded when Foundation Models aren't available on
+    /// this device/OS so the user never sees an option that would fail.
+    private lazy var providers: [ModelProvider] = ModelProvider.allCases.filter {
+        if $0 == .apple { return ModelProvider.isAppleFoundationAvailable }
+        return !ModelSelection.models(for: $0).isEmpty
     }
 
     override func viewDidLoad() {

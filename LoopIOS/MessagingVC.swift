@@ -916,7 +916,8 @@ extension MessagingVC: MessageBoxDelegate {
                 }
 
 
-                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – I'm having trouble connecting to Gemini. Please try again.")
+                let modelName = ModelSelectionStore.current.displayName
+                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – \(modelName) didn't respond. You can try again or switch models in Settings ▸ Model.")
                 self.messages.append(errorMessage)
                 self.messageIdToAnimate = errorMessage.id
 
@@ -1030,7 +1031,8 @@ extension MessagingVC: MessageBoxDelegate {
                 }
                 
                 
-                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – I'm having trouble connecting to Gemini. Please try again.")
+                let modelName = ModelSelectionStore.current.displayName
+                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – \(modelName) didn't respond. You can try again or switch models in Settings ▸ Model.")
                 self.messages.append(errorMessage)
                 self.messageIdToAnimate = errorMessage.id
 
