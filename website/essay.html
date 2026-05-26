@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>iHarness: You Hold the Leash — Loop</title>
+<meta name="description" content="An essay on why AI should be harnessed by its user — the thesis behind LoopHarness and iHarness." />
+<meta property="og:title" content="iHarness: You Hold the Leash" />
+<meta property="og:description" content="An essay on why AI should be harnessed by its user — the thesis behind LoopHarness and iHarness." />
+<meta property="og:url" content="https://loopharness.com/essay" />
+<meta property="og:type" content="article" />
+<meta name="theme-color" content="#0a0a0a" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<style>
+/* ── essay page ─────────────────────────────────────────────── */
+
+.essay-page {
+  background: var(--paper);
+  color: var(--paper-ink);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* nav override — static, paper-colored */
+.essay-page .nav {
+  position: relative;
+  color: var(--paper-ink);
+}
+.essay-page .nav__github     { color: var(--paper-ink); opacity: 0.65; }
+.essay-page .nav__testflight { color: var(--paper-ink); border-color: var(--paper-line); }
+
+.essay__header {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 40px 32px 0;
+  width: 100%;
+}
+.essay__back {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--paper-mute);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.15s;
+}
+.essay__back:hover { color: var(--paper-ink); }
+
+.essay__body {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 48px 32px 120px;
+  width: 100%;
+}
+
+.essay__body h1 {
+  font-family: var(--serif);
+  font-size: clamp(40px, 5vw, 56px);
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  line-height: 1.08;
+  margin: 0 0 16px;
+  color: var(--paper-ink);
+}
+
+.essay__date {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--paper-mute);
+  margin-bottom: 48px;
+}
+
+.essay__rule {
+  border: none;
+  border-top: 1px solid var(--paper-line);
+  margin: 48px 0;
+}
+
+.essay__body h2 {
+  font-family: var(--sans);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  margin: 56px 0 20px;
+  color: var(--paper-ink);
+}
+
+.essay__body p {
+  font-size: 17px;
+  line-height: 1.72;
+  color: var(--paper-ink);
+  margin: 0 0 20px;
+}
+
+.essay__body em {
+  font-style: italic;
+}
+
+.essay__body strong {
+  font-weight: 600;
+  color: var(--paper-ink);
+}
+
+.essay__body ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 20px;
+}
+
+.essay__body ul li {
+  font-size: 17px;
+  line-height: 1.72;
+  color: var(--paper-ink);
+  padding-left: 24px;
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.essay__body ul li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 12px;
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* revision notes — rendered subtly */
+.essay__revision {
+  margin-top: 64px;
+  padding-top: 32px;
+  border-top: 1px solid var(--paper-line);
+  color: var(--paper-mute);
+}
+.essay__revision p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--paper-mute);
+  font-style: italic;
+  margin-bottom: 10px;
+}
+.essay__revision ul li {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--paper-mute);
+}
+.essay__revision ul li::before {
+  background: var(--mute);
+  width: 6px;
+  height: 6px;
+  top: 10px;
+}
+
+/* footer on essay page */
+.essay-page .foot {
+  margin-top: auto;
+}
+
+/* ── responsive ─────────────────────────────────────────────── */
+@media (max-width: 800px) {
+  .essay__body h1 { font-size: 36px; }
+  .essay__body h2 { font-size: 20px; }
+  .essay__body { padding: 40px 24px 80px; }
+  .essay__header { padding: 32px 24px 0; }
+}
+@media (max-width: 520px) {
+  .essay__body h1 { font-size: 30px; }
+  .essay__body p, .essay__body ul li { font-size: 16px; }
+}
+</style>
+</head>
+<body class="essay-page">
+
+<!-- ────────── NAV ────────── -->
+<nav class="nav">
+  <a class="nav__brand" href="/">
+    <span class="nav__brand-orb"></span>
+    <span>Loop</span>
+  </a>
+  <div class="nav__links">
+    <a href="/#surfaces">Surfaces</a>
+    <a href="/#skills">Skills</a>
+    <a href="/#memory">Memory</a>
+    <a href="/#open-source">Open Source</a>
+    <a href="/essay">Essay</a>
+  </div>
+  <div class="nav__ctas">
+    <a class="nav__github" href="https://github.com/theashbhat/LoopHarness" target="_blank" rel="noreferrer">github&nbsp;↗</a>
+    <a class="nav__testflight" href="https://github.com/theashbhat/LoopHarness#setup" target="_blank" rel="noreferrer">Get the app</a>
+  </div>
+</nav>
+
+<!-- ────────── ESSAY ────────── -->
+<div class="essay__header">
+  <a class="essay__back" href="/">← Back to Loop</a>
+</div>
+
+<article class="essay__body">
+
+  <h1>iHarness: You Hold the Leash</h1>
+  <div class="essay__date">Draft 1 — May 23, 2026</div>
+
+  <hr class="essay__rule" />
+
+  <h2>I. The Walk</h2>
+
+  <p>Leo pulls. He's a mini golden retriever, eight pounds of momentum on a Saturday morning, and the only reason we make it down Shrader Street in one piece is the harness. Not a muzzle. Not a cage. A harness — a piece of geometry that translates his enthusiasm into my direction.</p>
+
+  <p>He still chooses what to sniff. I still choose where we're going. The harness is what makes the partnership possible.</p>
+
+  <p>I've been thinking about this metaphor for a year now, and I think it's the right frame for what AI should be.</p>
+
+  <h2>II. Today, You're the One in the Harness</h2>
+
+  <p>Open the App Store. Every "AI" product is built around a simple structural assumption: the model is the center of gravity, and you orbit it. You pay a subscription to access <em>their</em> cloud. You accept <em>their</em> model selection. You hand over <em>your</em> data, your context, your attention, and in return you get a chat box that resets every morning.</p>
+
+  <p>The leash runs the wrong way.</p>
+
+  <p>The pitch is always <em>intelligence on tap</em>, but the reality is that the intelligence comes with a collar. You don't own the weights. You don't own the memory. You don't own the loop. When the provider changes the model, your tools change underneath you. When they raise prices, you pay. When they sunset a feature, it's gone.</p>
+
+  <p>This is not leverage. This is leasing.</p>
+
+  <h2>III. Invert the Harness</h2>
+
+  <p>What if the human held the handle?</p>
+
+  <p>What if the AI lived on <em>your</em> device, with <em>your</em> compute, reading <em>your</em> files, remembering <em>your</em> life — and you decided, day by day, what it was allowed to pull on?</p>
+
+  <p>That's the bet behind <strong>LoopHarness</strong> (the open-source project) and <strong>iHarness</strong> (the consumer app I'm building on top of it).</p>
+
+  <p>The name is the thesis. <em>You harness AI.</em> You take its strength — and modern AI is genuinely strong, the way a young golden retriever is strong — and you point it at the parts of your life that need pulling. Email. Calendar. Code. Memory. Writing. Errands. Whatever's heavy this week.</p>
+
+  <p>You don't ride it. You don't worship it. You don't fear it. You harness it.</p>
+
+  <h2>IV. LoopHarness: The Substrate</h2>
+
+  <p>LoopHarness is the open repo. It's the harness pattern, written down in code, so anyone can read it, fork it, audit it, and bend it.</p>
+
+  <p>It assumes:</p>
+  <ul>
+    <li><strong>Local-first compute</strong> wherever possible. Your phone and your Mac are the default runtime. The cloud is opt-in, not assumed.</li>
+    <li><strong>Persistent memory</strong> that belongs to the user. Notes, conversations, decisions, preferences — all stored in the user's own filesystem (Obsidian, iCloud, plain markdown), not in a vendor's database.</li>
+    <li><strong>A human in the loop, always.</strong> The system is self-improving, but the loop closes through <em>me</em>. I am the one who decides what to remember, what to act on, what to discard.</li>
+    <li><strong>Skills, not features.</strong> New capabilities get written as small, inspectable units that the user (or the agent itself, with permission) can author, edit, schedule, and delete.</li>
+  </ul>
+
+  <p>It's a substrate. It's deliberately not a product. It's the harness pattern in its purest form, for engineers and tinkerers who want to see how it works.</p>
+
+  <h2>V. iHarness: The Handle</h2>
+
+  <p>iHarness is what a normal person picks up.</p>
+
+  <p>Same engine. Same loop. Same local-first values. But shipped as an App Store artifact, with the rough edges sanded down, the integrations pre-wired, and a logo that captures the whole thing in one image: <strong>a golden retriever harness.</strong></p>
+
+  <p>The app icon is the metaphor. You see it, you understand the deal.</p>
+
+  <p>iHarness is for the person who doesn't want to clone a repo. Who doesn't want to manage API keys. Who just wants to wake up, talk to their AI, and feel — for the first time — that <em>they</em> are the one holding the handle.</p>
+
+  <h2>VI. Self-Improving, With a Human in the Loop</h2>
+
+  <p>The phrase "self-improving AI" usually arrives with a shiver. Runaway optimization. Goals gone sideways. The classic alignment nightmare.</p>
+
+  <p>But that's the version without a harness.</p>
+
+  <p>The version <em>with</em> a harness is calm. The system improves itself — it writes its own skills, refines its own memory, proposes its own upgrades — but every meaningful change passes through a human. Not as a bureaucratic checkpoint. As a <em>directional input</em>. The human is what tells the system where to walk.</p>
+
+  <p>I am the loop. Loop is the harness. Together we go further than either of us would alone.</p>
+
+  <h2>VII. The Bet: Leverage Over Convenience</h2>
+
+  <p>The dominant AI products are optimized for convenience. One tap, one prompt, one answer. They're frictionless because friction is bad for retention.</p>
+
+  <p>iHarness is optimized for <strong>leverage</strong>. Sometimes that means more friction up front — you set up your memory, you pick your integrations, you author your own skills — because the payoff is an AI that compounds with you over years, not one that resets every conversation.</p>
+
+  <p>Convenience rents you intelligence. Leverage gives you compounding intelligence you own.</p>
+
+  <p>I'd rather own a harness than rent a leash.</p>
+
+  <h2>VIII. Closing</h2>
+
+  <p>Leo and I make it to the end of the block. He has sniffed approximately four hundred things. I have thought about exactly one. The harness has done its quiet work.</p>
+
+  <p>This is the relationship I want with AI. Not master and servant. Not user and tool. Not partner, even — that word's been worn thin.</p>
+
+  <p>I want a harness. A piece of geometry, light on the body, that translates raw capability into chosen direction.</p>
+
+  <p>You harness AI.</p>
+
+  <p>That's the whole pitch.</p>
+
+  <hr class="essay__rule" />
+
+  <!-- Notes for revision — preserved in source, rendered subtly -->
+  <div class="essay__revision">
+    <p><em>Notes for revision:</em></p>
+    <ul>
+      <li>Maybe open with the LoopHarness → iHarness naming earlier, so the reader gets the product context faster.</li>
+      <li>The Leo cold open works but could be tighter — half its current length.</li>
+      <li>Section VI (self-improving) is the section most likely to draw skepticism; consider a concrete example.</li>
+      <li>Add a section on <strong>why the App Store</strong> vs. open repo audiences need different framings.</li>
+      <li>Title alternatives: <em>"Hold the Leash"</em>, <em>"You Harness AI"</em>, <em>"The Inverted Harness"</em>.</li>
+    </ul>
+  </div>
+
+</article>
+
+<!-- ────────── FOOTER ────────── -->
+<footer class="foot">
+  <div class="foot__left">
+    <span class="foot__orb"></span>
+    <span class="foot__brand">Loop</span>
+    <span class="foot__by">© 2026 · made with care, in San Francisco</span>
+  </div>
+  <div class="foot__links">
+    <a href="/#surfaces">iOS</a>
+    <a href="/#surfaces">macOS</a>
+    <a href="/#surfaces">visionOS</a>
+    <a href="/essay">Essay</a>
+    <a href="https://github.com/theashbhat/LoopHarness" target="_blank" rel="noreferrer">GitHub</a>
+    <a href="https://github.com/theashbhat/LoopHarness/commits/main" target="_blank" rel="noreferrer">Changelog</a>
+  </div>
+</footer>
+
+</body>
+</html>
