@@ -932,7 +932,8 @@ extension MessagingVC: MessageBoxDelegate {
                 }
 
 
-                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – I'm having trouble connecting to Gemini. Please try again.")
+                let modelName = ModelSelectionStore.current.displayName
+                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – \(modelName) didn't respond. You can try again or switch models in Settings ▸ Model.")
                 ActiveRequestTracker.shared.markIdle(reqConvId)
                 if let target = self.conversationManager.getConversation(by: reqConvId) {
                     self.conversationManager.addMessage(errorMessage, to: target)
@@ -1064,7 +1065,8 @@ extension MessagingVC: MessageBoxDelegate {
                 }
                 
                 
-                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – I'm having trouble connecting to Gemini. Please try again.")
+                let modelName = ModelSelectionStore.current.displayName
+                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – \(modelName) didn't respond. You can try again or switch models in Settings ▸ Model.")
                 ActiveRequestTracker.shared.markIdle(requestConversationId)
 
                 // Persist to the originating conversation
