@@ -30,6 +30,12 @@ final class AgentLargeVC: UIViewController {
         set { agentView.voiceDelegate = newValue }
     }
 
+    /// Called when the user taps the orb or drags past the dismiss
+    /// threshold. When hosted as a child view controller (the default
+    /// now), MainVC sets this to tear down the child; when presented as
+    /// a modal it falls through to `dismiss(animated:)`.
+    var onDismiss: ((_ panDismiss: Bool) -> Void)?
+
     /// Pan gesture used for the rubber-band drag-down dismiss. Tracked here
     /// so the gesture can be cancelled / reset cleanly on dismiss.
     private var panGesture: UIPanGestureRecognizer!
@@ -67,7 +73,11 @@ final class AgentLargeVC: UIViewController {
     // MARK: - Dismiss interactions
 
     @objc private func handleTap() {
-        dismiss(animated: true)
+        if let onDismiss = onDismiss {
+            onDismiss(false)
+        } else {
+            dismiss(animated: true)
+        }
     }
 
     @objc private func handlePan(_ pan: UIPanGestureRecognizer) {
@@ -86,7 +96,11 @@ final class AgentLargeVC: UIViewController {
             view.alpha = 1 - 0.4 * progress
         case .ended, .cancelled:
             if translation.y > dismissThreshold {
-                dismiss(animated: true)
+                if let onDismiss = onDismiss {
+                    onDismiss(true)
+                } else {
+                    dismiss(animated: true)
+                }
             } else {
                 UIView.animate(withDuration: 0.3,
                                delay: 0,
