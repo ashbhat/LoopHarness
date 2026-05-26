@@ -64,9 +64,23 @@ final class OpenAIChat {
             "messages": Self.wireMessages(from: messages),
         ]
         // Skill schemas already use the modern {"type":"function","function":…}
-        // shape, so they pass straight through with no remapping.
+        // shape, so they pass straight through with no remapping. OpenAI rejects
+        // requests with more than 128 tools ("Invalid 'tools': array too long"),
+        // so cap here — on Mac the iOS-bundled set + MacApp/Terminal + any
+        // dynamic/MCP tools can edge over the limit.
         if let tools = tools, !tools.isEmpty {
-            body["tools"] = tools
+            let capped: [[String: Any]]
+            if tools.count > 128 {
+                let dropped = tools.count - 128
+                let droppedNames = tools.suffix(dropped).compactMap { schema -> String? in
+                    (schema["function"] as? [String: Any])?["name"] as? String
+                }
+                print("OpenAIChat: tools=\(tools.count) exceeds OpenAI cap of 128; dropping \(dropped): \(droppedNames)")
+                capped = Array(tools.prefix(128))
+            } else {
+                capped = tools
+            }
+            body["tools"] = capped
             body["tool_choice"] = "auto"
         }
 
@@ -146,8 +160,8 @@ final class OpenAIChat {
     /// with no `callId` fall back to prose so older conversations keep
     /// working.
     ///
-    /// Reused by sibling OpenAI-compatible clients (KimiChat) — the wire
-    /// shape is identical so there's no point duplicating the mapping.
+    /// Reused by sibling OpenAI-compatible clients (FireworksChat) — the
+    /// wire shape is identical so there's no point duplicating the mapping.
     static func wireMessages(from messages: [MessageStruct]) -> [[String: Any]] {
         return sanitizeToolCallPairing(stripUIPlaceholders(messages)).map { m -> [String: Any] in
             if m.role == "function" {

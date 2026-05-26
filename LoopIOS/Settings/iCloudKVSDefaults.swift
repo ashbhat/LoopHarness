@@ -98,6 +98,7 @@ final class iCloudKVSDefaults {
         if shouldMirror(key) {
             kvs.set(value, forKey: key)
         }
+        postDidChange(for: key)
     }
 
     func set(_ value: Int, forKey key: String) {
@@ -105,6 +106,7 @@ final class iCloudKVSDefaults {
         if shouldMirror(key) {
             kvs.set(Int64(value), forKey: key)
         }
+        postDidChange(for: key)
     }
 
     func set(_ value: String?, forKey key: String) {
@@ -116,6 +118,20 @@ final class iCloudKVSDefaults {
                 kvs.removeObject(forKey: key)
             }
         }
+        postDidChange(for: key)
+    }
+
+    /// Surface every local write through the same notification the KVS-external
+    /// mirror uses, so observers (e.g. the nav-bar speaker button) refresh
+    /// regardless of who wrote — including code paths that go through this
+    /// facade directly rather than a dedicated typed store. Posted on the
+    /// caller's thread; observers that touch UIKit should hop to main.
+    private func postDidChange(for key: String) {
+        NotificationCenter.default.post(
+            name: iCloudKVSDefaults.didChangeNotification,
+            object: nil,
+            userInfo: ["keys": [key]]
+        )
     }
 
     // MARK: - Private

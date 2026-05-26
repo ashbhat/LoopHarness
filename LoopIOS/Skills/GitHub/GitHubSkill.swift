@@ -55,11 +55,7 @@ Reads (no confirmation):
 - list_github_repos: list the user's repositories, newest-updated first. `affiliation` defaults to "owner,collaborator,organization_member".
 - get_github_repo: full repo metadata including default branch.
 - list_pull_requests: PRs in a repo. `state` is open|closed|all (default open).
-- get_pull_request: full PR details including mergeable state.
-- pull_request_diff: raw unified diff. Use this to actually read what's being changed before reviewing.
-- pull_request_files: list of changed files with per-file patches.
-- pull_request_reviews: existing reviews + review-level comments on a PR.
-- pull_request_checks: CI status (check-runs + commit statuses) for the PR's head sha.
+- get_pull_request: full PR details including mergeable state. Optional `include`: an array of `diff` (raw unified diff, truncated), `files` (changed paths + per-file patches), `reviews` (existing reviews + inline comments), `checks` (CI check-runs for the head sha). Combine what you need in one call — e.g. include=["diff","files"] before submitting a review.
 - list_issues / get_issue: same shape for issues. (GitHub treats PRs as a subclass of issues — issue endpoints work on PR numbers for comment threads.)
 - list_branches: branches in a repo.
 - github_file_contents: read a file at any ref (branch/tag/sha) without cloning.
@@ -78,7 +74,7 @@ Cloning:
 - clone_github_repo: clone a repo into the workspace using the stored PAT — no need to paste it inline. Pass `owner` and `repo` (and optional `dest`). Internally delegates to git_clone.
 
 Workflow tips:
-- Before reviewing, call pull_request_diff (and optionally pull_request_files for paths). Don't review blind.
+- Before reviewing, call get_pull_request with include=["diff","files"]. Don't review blind.
 - For merge: most repos want `squash`. Ask the user only if there's no obvious convention; otherwise pick squash by default and let the confirmation alert be the checkpoint.
 - For approving your own PRs: GitHub rejects that with `unprocessable_entity`. Suggest the user request a review or use comment_pull_request instead.
 - If a tool returns `github_not_connected`, the user has no PAT set. If it returns `forbidden` with a hint about missing scopes, name the scopes the PAT needs.
@@ -158,78 +154,19 @@ Workflow tips:
             "type": "function",
             "function": [
                 "name": "get_pull_request",
-                "description": "Full details for a single PR — title, body, head/base, mergeable state, requested reviewers.",
+                "description": "Full details for a single PR — title, body, head/base, mergeable state, requested reviewers. Pass `include` to also pull diff/files/reviews/checks in one call (review workflow: include=[\"diff\",\"files\"]).",
                 "parameters": [
                     "type": "object",
                     "properties": [
                         "owner":  ["type": "string"],
                         "repo":   ["type": "string"],
-                        "number": ["type": "integer", "description": "PR number (not the node id)."]
-                    ],
-                    "required": ["owner", "repo", "number"]
-                ]
-            ]
-        ],
-        [
-            "type": "function",
-            "function": [
-                "name": "pull_request_diff",
-                "description": "Raw unified diff text for a PR. Truncated to a reasonable size; use pull_request_files if you only need paths.",
-                "parameters": [
-                    "type": "object",
-                    "properties": [
-                        "owner":  ["type": "string"],
-                        "repo":   ["type": "string"],
-                        "number": ["type": "integer"]
-                    ],
-                    "required": ["owner", "repo", "number"]
-                ]
-            ]
-        ],
-        [
-            "type": "function",
-            "function": [
-                "name": "pull_request_files",
-                "description": "List files changed in a PR with per-file patches and add/del counts.",
-                "parameters": [
-                    "type": "object",
-                    "properties": [
-                        "owner":  ["type": "string"],
-                        "repo":   ["type": "string"],
-                        "number": ["type": "integer"],
-                        "limit":  ["type": "integer", "description": "Default 30, max 100."]
-                    ],
-                    "required": ["owner", "repo", "number"]
-                ]
-            ]
-        ],
-        [
-            "type": "function",
-            "function": [
-                "name": "pull_request_reviews",
-                "description": "Existing reviews on a PR + their inline comments.",
-                "parameters": [
-                    "type": "object",
-                    "properties": [
-                        "owner":  ["type": "string"],
-                        "repo":   ["type": "string"],
-                        "number": ["type": "integer"]
-                    ],
-                    "required": ["owner", "repo", "number"]
-                ]
-            ]
-        ],
-        [
-            "type": "function",
-            "function": [
-                "name": "pull_request_checks",
-                "description": "CI check-runs and commit statuses for the PR's head sha. Rolls up to a simple state per check.",
-                "parameters": [
-                    "type": "object",
-                    "properties": [
-                        "owner":  ["type": "string"],
-                        "repo":   ["type": "string"],
-                        "number": ["type": "integer"]
+                        "number": ["type": "integer", "description": "PR number (not the node id)."],
+                        "include": [
+                            "type": "array",
+                            "description": "Extra sections to fetch alongside PR metadata. Allowed: diff (raw unified diff, truncated), files (changed paths + patches), reviews (existing reviews + inline comments), checks (CI check-runs for head sha).",
+                            "items": ["type": "string", "enum": ["diff", "files", "reviews", "checks"]]
+                        ],
+                        "files_limit": ["type": "integer", "description": "When include contains \"files\": cap on number of files returned. Default 30, max 100."]
                     ],
                     "required": ["owner", "repo", "number"]
                 ]
@@ -549,10 +486,6 @@ Workflow tips:
         "get_github_repo",
         "list_pull_requests",
         "get_pull_request",
-        "pull_request_diff",
-        "pull_request_files",
-        "pull_request_reviews",
-        "pull_request_checks",
         "list_issues",
         "get_issue",
         "list_branches",
@@ -584,10 +517,6 @@ Workflow tips:
         case "get_github_repo":        return "reading repo info"
         case "list_pull_requests":     return "listing pull requests"
         case "get_pull_request":       return "reading PR"
-        case "pull_request_diff":      return "reading PR diff"
-        case "pull_request_files":     return "listing PR files"
-        case "pull_request_reviews":   return "reading PR reviews"
-        case "pull_request_checks":    return "checking CI status"
         case "list_issues":            return "listing issues"
         case "get_issue":              return "reading issue"
         case "list_branches":          return "listing branches"
@@ -665,142 +594,11 @@ Workflow tips:
 
         case "get_pull_request":
             guard let (owner, repo, number) = Self.ownerRepoNumber(args, name: functionCall.name, completion: completion) else { return }
-            githubRequest(.get, path: "/repos/\(owner)/\(repo)/pulls/\(number)") { [weak self] result in
-                self?.respond(functionCall.name, result: result, completion: completion) { Self.trimPR($0, full: true) }
-            }
-
-        case "pull_request_diff":
-            guard let (owner, repo, number) = Self.ownerRepoNumber(args, name: functionCall.name, completion: completion) else { return }
-            githubRawRequest(.get, path: "/repos/\(owner)/\(repo)/pulls/\(number)",
-                             accept: "application/vnd.github.v3.diff") { [weak self] result in
-                guard let self else { return }
-                switch result {
-                case .failure(let err):
-                    completion(self.errorMessage(for: functionCall.name, error: err))
-                case .success(let text):
-                    // Truncate aggressively. A multi-thousand-line diff would
-                    // crush the model's context for marginal benefit.
-                    let maxBytes = 32_000
-                    let payload: [String: Any]
-                    if text.utf8.count > maxBytes {
-                        let truncated = String(text.prefix(maxBytes))
-                        payload = [
-                            "diff": truncated,
-                            "truncated": true,
-                            "original_bytes": text.utf8.count,
-                            "hint": "Diff truncated at \(maxBytes) bytes. Use pull_request_files to inspect specific paths."
-                        ]
-                    } else {
-                        payload = ["diff": text, "truncated": false]
-                    }
-                    completion(Self.functionMessage(name: functionCall.name, payload: payload))
-                }
-            }
-
-        case "pull_request_files":
-            guard let (owner, repo, number) = Self.ownerRepoNumber(args, name: functionCall.name, completion: completion) else { return }
-            let limit = Self.clamp(Self.intArg(args["limit"]) ?? 30, 1, 100)
-            githubRequest(.get,
-                          path: "/repos/\(owner)/\(repo)/pulls/\(number)/files",
-                          query: ["per_page": String(limit)]) { [weak self] result in
-                self?.respondList(functionCall.name, result: result, completion: completion) { file -> [String: Any] in
-                    return [
-                        "filename":  file["filename"]  as? String ?? "",
-                        "status":    file["status"]    as? String ?? "",
-                        "additions": file["additions"] as? Int    ?? 0,
-                        "deletions": file["deletions"] as? Int    ?? 0,
-                        "changes":   file["changes"]   as? Int    ?? 0,
-                        "patch":     file["patch"]     as? String ?? ""
-                    ]
-                }
-            }
-
-        case "pull_request_reviews":
-            guard let (owner, repo, number) = Self.ownerRepoNumber(args, name: functionCall.name, completion: completion) else { return }
-            githubRequest(.get, path: "/repos/\(owner)/\(repo)/pulls/\(number)/reviews") { [weak self] reviewsResult in
-                guard let self else { return }
-                switch reviewsResult {
-                case .failure(let err):
-                    completion(self.errorMessage(for: functionCall.name, error: err))
-                case .success(let json):
-                    let reviews = (json as? [[String: Any]] ?? []).map { r -> [String: Any] in
-                        [
-                            "id":     r["id"] as? Int ?? 0,
-                            "state":  r["state"] as? String ?? "",
-                            "user":   (r["user"] as? [String: Any])?["login"] as? String ?? "",
-                            "body":   r["body"] as? String ?? "",
-                            "submitted_at": r["submitted_at"] as? String ?? ""
-                        ]
-                    }
-                    // Also fetch review-level comments so the agent sees inline notes.
-                    self.githubRequest(.get,
-                                       path: "/repos/\(owner)/\(repo)/pulls/\(number)/comments",
-                                       query: ["per_page": "100"]) { commentsResult in
-                        let comments: [[String: Any]]
-                        if case let .success(c) = commentsResult, let arr = c as? [[String: Any]] {
-                            comments = arr.map { com in
-                                [
-                                    "user":     (com["user"] as? [String: Any])?["login"] as? String ?? "",
-                                    "path":     com["path"]      as? String ?? "",
-                                    "line":     com["line"]      as? Int    ?? (com["original_line"] as? Int ?? 0),
-                                    "side":     com["side"]      as? String ?? "RIGHT",
-                                    "body":     com["body"]      as? String ?? "",
-                                    "in_reply_to_id": com["in_reply_to_id"] as? Int ?? 0,
-                                    "created_at": com["created_at"] as? String ?? ""
-                                ]
-                            }
-                        } else {
-                            comments = []
-                        }
-                        completion(Self.functionMessage(name: functionCall.name, payload: [
-                            "reviews": reviews,
-                            "inline_comments": comments
-                        ]))
-                    }
-                }
-            }
-
-        case "pull_request_checks":
-            guard let (owner, repo, number) = Self.ownerRepoNumber(args, name: functionCall.name, completion: completion) else { return }
-            // Need the head sha first — get the PR, then ask for checks on its sha.
-            githubRequest(.get, path: "/repos/\(owner)/\(repo)/pulls/\(number)") { [weak self] prResult in
-                guard let self else { return }
-                switch prResult {
-                case .failure(let err):
-                    completion(self.errorMessage(for: functionCall.name, error: err))
-                case .success(let json):
-                    let sha = ((json as? [String: Any])?["head"] as? [String: Any])?["sha"] as? String ?? ""
-                    guard !sha.isEmpty else {
-                        completion(Self.functionMessage(name: functionCall.name, payload: [
-                            "error": "no_head_sha",
-                            "hint": "PR has no head sha — possibly already closed."
-                        ]))
-                        return
-                    }
-                    self.githubRequest(.get,
-                                       path: "/repos/\(owner)/\(repo)/commits/\(sha)/check-runs") { checksResult in
-                        let runs: [[String: Any]]
-                        if case let .success(c) = checksResult,
-                           let dict = c as? [String: Any],
-                           let arr = dict["check_runs"] as? [[String: Any]] {
-                            runs = arr.map { run in
-                                [
-                                    "name":       run["name"]       as? String ?? "",
-                                    "status":     run["status"]     as? String ?? "",
-                                    "conclusion": run["conclusion"] as? String ?? "",
-                                    "html_url":   run["html_url"]   as? String ?? ""
-                                ]
-                            }
-                        } else {
-                            runs = []
-                        }
-                        completion(Self.functionMessage(name: functionCall.name, payload: [
-                            "head_sha":   sha,
-                            "check_runs": runs
-                        ]))
-                    }
-                }
-            }
+            let include = Set((args["include"] as? [String] ?? []).map { $0.lowercased() })
+            let filesLimit = Self.clamp(Self.intArg(args["files_limit"]) ?? 30, 1, 100)
+            fetchPullRequest(owner: owner, repo: repo, number: number,
+                             include: include, filesLimit: filesLimit,
+                             name: functionCall.name, completion: completion)
 
         case "list_issues":
             guard let (owner, repo) = Self.ownerRepo(args, name: functionCall.name, completion: completion) else { return }
@@ -1234,6 +1032,190 @@ Workflow tips:
                 content: "I don't know how to handle the GitHub tool '\(functionCall.name)'."
             ))
         }
+    }
+
+    // MARK: - PR fetch helper
+    //
+    // Backing implementation for `get_pull_request`. Always fetches the PR
+    // metadata; then sequentially layers in whichever extras the caller asked
+    // for via `include` — diff (raw unified diff), files (changed paths +
+    // patches), reviews (existing reviews + inline comments), checks (CI
+    // check-runs for the head sha). Sequential rather than parallel because
+    // the call sites already chain like this and the savings on a single PR
+    // are not worth the closure gymnastics.
+    private func fetchPullRequest(owner: String,
+                                  repo: String,
+                                  number: Int,
+                                  include: Set<String>,
+                                  filesLimit: Int,
+                                  name: String,
+                                  completion: @escaping (MessageStruct) -> Void) {
+        githubRequest(.get, path: "/repos/\(owner)/\(repo)/pulls/\(number)") { [weak self] prResult in
+            guard let self else { return }
+            switch prResult {
+            case .failure(let err):
+                completion(self.errorMessage(for: name, error: err))
+            case .success(let json):
+                let prDict = (json as? [String: Any]) ?? [:]
+                var payload: [String: Any] = Self.trimPR(prDict, full: true)
+                let headSha = ((prDict["head"] as? [String: Any])?["sha"] as? String) ?? ""
+
+                // Build the work queue. Each step runs sequentially and
+                // mutates `payload` before invoking the next.
+                var steps: [(@escaping () -> Void) -> Void] = []
+
+                if include.contains("diff") {
+                    steps.append { next in
+                        self.githubRawRequest(.get,
+                                              path: "/repos/\(owner)/\(repo)/pulls/\(number)",
+                                              accept: "application/vnd.github.v3.diff") { result in
+                            switch result {
+                            case .failure(let err):
+                                payload["diff_error"] = self.errorPayload(for: err)
+                            case .success(let text):
+                                let maxBytes = 32_000
+                                if text.utf8.count > maxBytes {
+                                    payload["diff"] = String(text.prefix(maxBytes))
+                                    payload["diff_truncated"] = true
+                                    payload["diff_original_bytes"] = text.utf8.count
+                                } else {
+                                    payload["diff"] = text
+                                    payload["diff_truncated"] = false
+                                }
+                            }
+                            next()
+                        }
+                    }
+                }
+
+                if include.contains("files") {
+                    steps.append { next in
+                        self.githubRequest(.get,
+                                           path: "/repos/\(owner)/\(repo)/pulls/\(number)/files",
+                                           query: ["per_page": String(filesLimit)]) { result in
+                            switch result {
+                            case .failure(let err):
+                                payload["files_error"] = self.errorPayload(for: err)
+                            case .success(let json):
+                                let arr = (json as? [[String: Any]]) ?? []
+                                payload["files"] = arr.map { file -> [String: Any] in
+                                    [
+                                        "filename":  file["filename"]  as? String ?? "",
+                                        "status":    file["status"]    as? String ?? "",
+                                        "additions": file["additions"] as? Int    ?? 0,
+                                        "deletions": file["deletions"] as? Int    ?? 0,
+                                        "changes":   file["changes"]   as? Int    ?? 0,
+                                        "patch":     file["patch"]     as? String ?? ""
+                                    ]
+                                }
+                            }
+                            next()
+                        }
+                    }
+                }
+
+                if include.contains("reviews") {
+                    steps.append { next in
+                        self.githubRequest(.get,
+                                           path: "/repos/\(owner)/\(repo)/pulls/\(number)/reviews") { reviewsResult in
+                            switch reviewsResult {
+                            case .failure(let err):
+                                payload["reviews_error"] = self.errorPayload(for: err)
+                                next()
+                            case .success(let json):
+                                let reviews = (json as? [[String: Any]] ?? []).map { r -> [String: Any] in
+                                    [
+                                        "id":     r["id"] as? Int ?? 0,
+                                        "state":  r["state"] as? String ?? "",
+                                        "user":   (r["user"] as? [String: Any])?["login"] as? String ?? "",
+                                        "body":   r["body"] as? String ?? "",
+                                        "submitted_at": r["submitted_at"] as? String ?? ""
+                                    ]
+                                }
+                                payload["reviews"] = reviews
+                                self.githubRequest(.get,
+                                                   path: "/repos/\(owner)/\(repo)/pulls/\(number)/comments",
+                                                   query: ["per_page": "100"]) { commentsResult in
+                                    if case let .success(c) = commentsResult, let arr = c as? [[String: Any]] {
+                                        payload["inline_comments"] = arr.map { com in
+                                            [
+                                                "user":     (com["user"] as? [String: Any])?["login"] as? String ?? "",
+                                                "path":     com["path"]      as? String ?? "",
+                                                "line":     com["line"]      as? Int    ?? (com["original_line"] as? Int ?? 0),
+                                                "side":     com["side"]      as? String ?? "RIGHT",
+                                                "body":     com["body"]      as? String ?? "",
+                                                "in_reply_to_id": com["in_reply_to_id"] as? Int ?? 0,
+                                                "created_at": com["created_at"] as? String ?? ""
+                                            ]
+                                        }
+                                    } else {
+                                        payload["inline_comments"] = [] as [[String: Any]]
+                                    }
+                                    next()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if include.contains("checks") {
+                    steps.append { next in
+                        guard !headSha.isEmpty else {
+                            payload["checks_error"] = ["error": "no_head_sha",
+                                                      "hint": "PR has no head sha — possibly already closed."] as [String: Any]
+                            next()
+                            return
+                        }
+                        self.githubRequest(.get,
+                                           path: "/repos/\(owner)/\(repo)/commits/\(headSha)/check-runs") { checksResult in
+                            switch checksResult {
+                            case .failure(let err):
+                                payload["checks_error"] = self.errorPayload(for: err)
+                            case .success(let json):
+                                let runs: [[String: Any]]
+                                if let dict = json as? [String: Any],
+                                   let arr = dict["check_runs"] as? [[String: Any]] {
+                                    runs = arr.map { run in
+                                        [
+                                            "name":       run["name"]       as? String ?? "",
+                                            "status":     run["status"]     as? String ?? "",
+                                            "conclusion": run["conclusion"] as? String ?? "",
+                                            "html_url":   run["html_url"]   as? String ?? ""
+                                        ]
+                                    }
+                                } else {
+                                    runs = []
+                                }
+                                payload["head_sha"]   = headSha
+                                payload["check_runs"] = runs
+                            }
+                            next()
+                        }
+                    }
+                }
+
+                // Drain the queue, then return.
+                var index = 0
+                func runNext() {
+                    if index >= steps.count {
+                        completion(Self.functionMessage(name: name, payload: payload))
+                        return
+                    }
+                    let step = steps[index]
+                    index += 1
+                    step(runNext)
+                }
+                runNext()
+            }
+        }
+    }
+
+    /// Compact `[String: Any]` for inline error payloads inside the combined
+    /// PR response. Mirrors what `errorMessage(for:error:)` would surface but
+    /// stays inline so partial-failure cases (e.g. diff loaded, checks failed)
+    /// don't replace the whole response.
+    private func errorPayload(for err: GitHubError) -> [String: Any] {
+        ["error": String(describing: err)]
     }
 
     // MARK: - Confirmation plumbing

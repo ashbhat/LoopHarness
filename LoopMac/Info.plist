@@ -41,8 +41,8 @@
 	<string>$(OPENAI_API_KEY)</string>
 	<key>ANTHROPIC_API_KEY</key>
 	<string>$(ANTHROPIC_API_KEY)</string>
-	<key>KIMI_API_KEY</key>
-	<string>$(KIMI_API_KEY)</string>
+	<key>FIREWORKS_API_KEY</key>
+	<string>$(FIREWORKS_API_KEY)</string>
 	<key>OBSIDIAN_API_KEY</key>
 	<string>$(OBSIDIAN_API_KEY)</string>
 	<key>OBSIDIAN_BASE_URL</key>

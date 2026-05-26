@@ -151,6 +151,12 @@ final class ConversationWindowController: NSWindowController, ConversationPresen
         // users see nothing change. Posted prompts land in the active tab's
         // conversation, with chips rendered via `onboardingCards` sidecar.
         OnboardingCoordinator.shared.skipActionButtonStep = true
+        // On Mac the panel opens blank — wait for the user's first message,
+        // then drop the greeting in as a reply. Without this the "Nice to
+        // meet you" pops above the user's opener which reads awkwardly,
+        // especially when the user just types "hi" to see what the harness
+        // does.
+        OnboardingCoordinator.shared.deferGreetingUntilFirstMessage = true
         OnboardingCoordinator.shared.host = self
         DispatchQueue.main.async {
             OnboardingCoordinator.shared.resumeIfNeeded()
@@ -2507,19 +2513,39 @@ extension ConversationWindowController: OnboardingCoordinatorHost, MacOnboarding
         if let card = message.onboardingCard {
             onboardingCards[message.id] = card
         }
+        // Reveal beat for mid-flow assistant turns — mirrors iOS, where every
+        // assistant turn after the first greeting sits behind a brief
+        // "thinking" label so the scripted prompts feel reactive instead of
+        // teleported in. The first greeting (empty stack) and user echoes
+        // both post immediately — no thinking required there.
+        let isAssistantWithCard = message.role == "assistant" && message.onboardingCard != nil
+        if isAssistantWithCard && !stack.arrangedSubviews.isEmpty {
+            thinkingLabel.stringValue = "Thinking…"
+            thinkingLabel.textColor = .secondaryLabelColor
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.onboardingThinkingDelay) { [weak self] in
+                guard let self = self else { return }
+                self.thinkingLabel.stringValue = Self.recordHintText
+                self.thinkingLabel.textColor = .tertiaryLabelColor
+                self.appendOnboardingMessageImmediately(message, to: conv)
+            }
+            return
+        }
+        appendOnboardingMessageImmediately(message, to: conv)
+    }
+
+    /// Shared append + scroll path used by both the immediate post (user
+    /// echoes, first greeting) and the post-thinking reveal (later assistant
+    /// turns). Two-stage scroll: the immediate `scrollToBottom` covers most
+    /// posts, the deferred 0.25s pass catches the case where the wrapping
+    /// chip stack lays out asynchronously and the initial scroll math used a
+    /// height that didn't yet include the chip row.
+    private func appendOnboardingMessageImmediately(_ message: MessageStruct, to conv: SimpleConversation) {
         SimpleConversationManager.shared.addMessage(message, to: conv)
-        // Use the live-append path (not reloadFromStore) so we don't tear
-        // down + rebuild the entire stack on every chip turn. For
-        // onboarding-card assistant messages we route through the chip
-        // bubble; for everything else fall back to the existing append
-        // primitives so model attribution / scroll / surfacing behave
-        // identically to a regular turn.
         if message.role == "assistant", let card = message.onboardingCard {
             stack.addArrangedSubview(
                 MacOnboardingChipBubble.makeBubble(text: message.content,
                                                   card: card,
                                                   delegate: self))
-            scrollToBottom()
             surfaceForOnboarding()
         } else if message.role == "user" {
             appendUserMessage(message.content)
@@ -2527,7 +2553,15 @@ extension ConversationWindowController: OnboardingCoordinatorHost, MacOnboarding
         } else if message.role == "assistant" {
             appendAssistantMessage(message.content, model: nil)
         }
+        scrollToBottom()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.scrollToBottom()
+        }
     }
+
+    /// Shimmer-to-message reveal pause for Mac onboarding — kept in sync
+    /// with the iOS constant so both platforms read the same beat.
+    private static let onboardingThinkingDelay: TimeInterval = 0.8
 
     /// Coordinator → host: flip a previously-posted bubble's chip row to
     /// `.answered` so it collapses. We have to rebuild here (vs. mutating

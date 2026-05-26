@@ -151,6 +151,15 @@ final class OnboardingCardView: UIView {
         config.attributedTitle = AttributedString(label, attributes: attrs)
         config.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 14, bottom: 7, trailing: 14)
         button.configuration = config
+        // UIButton.Configuration allows multi-line titles by default, which
+        // makes `systemLayoutSizeFitting(.layoutFittingCompressedSize)` (used
+        // by buildChipRow's wrap planner) return the narrower wrapped width
+        // — so labels like "Stay on GPT-5.5" ended up rendered on two lines
+        // inside their own pill. Pinning to one line + tail truncation forces
+        // the intrinsic width to the full single-line text, so chips stay
+        // pill-shaped and the row planner sees the real width.
+        button.titleLabel?.numberOfLines = 1
+        button.titleLabel?.lineBreakMode = .byTruncatingTail
         return button
     }
 

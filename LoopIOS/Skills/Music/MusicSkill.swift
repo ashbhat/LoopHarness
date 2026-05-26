@@ -20,7 +20,7 @@ You can put on music to match the moment via these tools:
 - play_music: start playback of a `target_id` from a previous find_music result. `target_type` ∈ "song" | "album" | "playlist". `queue_mode` ∈ "replace" | "append" (default "replace").
 - set_music_mood: high-level shortcut — pass `mood` and we pick a fitting track for you. Mood vocabulary: \(MusicMoodMap.vocabularyList). Pass `instrumental_only=true` to force a vocal-free pick.
 - create_playlist: save a curated list of `track_ids` as a playlist in the user's Apple Music library. iOS only; on macOS this returns a friendly error.
-- pause_music / resume_music / skip_track / stop_music: queue control. Use stop_music when the user wants music off entirely.
+- control_music: queue control. `action` ∈ "pause" | "resume" | "skip" | "stop". Use "stop" when the user wants music off entirely.
 - get_music_status: see what's playing (title, artist, instrumental hint, paused-or-playing, why paused).
 - request_music_authorization: explicitly trigger Apple Music's authorization dialog. Call this if set_music_mood or play_music returns `apple_music_unauthorized` — the response tells you which state the user is in so you can guide them.
 
@@ -28,7 +28,7 @@ How to behave:
 - Use set_music_mood whenever the user describes a feeling ("put on something focused", "I'm sad", "let's get hyped"). Prefer it over find_music when the user hasn't named a specific track.
 - In long, focused conversations, prefer instrumental tracks (set instrumental_only=true) so vocals don't fight with what we're saying.
 - Don't churn the queue — only change tracks or mood when the conversation meaningfully shifts. Once a mood is set, leave it alone.
-- Pausing for your own speech or while the mic is recording is automatic; do not call pause_music for that. Only pause / stop when the user asks.
+- Pausing for your own speech or while the mic is recording is automatic; do not call control_music(action="pause") for that. Only pause / stop when the user asks.
 - Apple Music playback requires an active subscription. If a play call returns `apple_music_unauthorized`, tell the user plainly.
 """
 
@@ -129,33 +129,19 @@ How to behave:
         [
             "type": "function",
             "function": [
-                "name": "pause_music",
-                "description": "Pause the current queue. Do not use this for transient ducking under TTS or recording — that's automatic.",
-                "parameters": ["type": "object", "properties": [:], "required": []]
-            ]
-        ],
-        [
-            "type": "function",
-            "function": [
-                "name": "resume_music",
-                "description": "Resume the current queue after a user-initiated pause.",
-                "parameters": ["type": "object", "properties": [:], "required": []]
-            ]
-        ],
-        [
-            "type": "function",
-            "function": [
-                "name": "skip_track",
-                "description": "Skip to the next track in the current queue.",
-                "parameters": ["type": "object", "properties": [:], "required": []]
-            ]
-        ],
-        [
-            "type": "function",
-            "function": [
-                "name": "stop_music",
-                "description": "Stop playback entirely and clear the queue. The auto-ducker won't auto-restart music after this.",
-                "parameters": ["type": "object", "properties": [:], "required": []]
+                "name": "control_music",
+                "description": "Queue control: pause / resume / skip / stop. Don't use pause for transient ducking under TTS or recording — that's automatic. Use stop to end playback entirely (auto-ducker won't auto-restart).",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "action": [
+                            "type": "string",
+                            "description": "pause = pause queue; resume = resume after user-initiated pause; skip = skip to next track; stop = end playback and clear queue.",
+                            "enum": ["pause", "resume", "skip", "stop"]
+                        ]
+                    ],
+                    "required": ["action"]
+                ]
             ]
         ],
         [
@@ -181,10 +167,7 @@ How to behave:
         "play_music",
         "set_music_mood",
         "create_playlist",
-        "pause_music",
-        "resume_music",
-        "skip_track",
-        "stop_music",
+        "control_music",
         "get_music_status",
         "request_music_authorization"
     ]
@@ -212,10 +195,14 @@ How to behave:
                 return "creating playlist \"\(n)\""
             }
             return "creating playlist"
-        case "pause_music":     return "pausing music"
-        case "resume_music":    return "resuming music"
-        case "skip_track":      return "skipping track"
-        case "stop_music":      return "stopping music"
+        case "control_music":
+            switch call.arguments["action"] as? String {
+            case "pause":  return "pausing music"
+            case "resume": return "resuming music"
+            case "skip":   return "skipping track"
+            case "stop":   return "stopping music"
+            default:       return "controlling music"
+            }
         case "get_music_status": return "checking music"
         default:                return nil
         }
@@ -300,36 +287,33 @@ How to behave:
                 }
             }
 
-        case "pause_music":
-            Task { @MainActor in
-                MusicController.shared.pause(reason: .userExplicit)
-                completion(Self.functionMessage(name: name, json: ["status": "ok"]))
+        case "control_music":
+            guard let action = (args["action"] as? String)?.lowercased() else {
+                completion(missingArgs(for: name, expected: "action (pause|resume|skip|stop)")); return
             }
-
-        case "resume_music":
             Task { @MainActor in
                 do {
-                    try await MusicController.shared.userResume()
-                    completion(Self.functionMessage(name: name, json: ["status": "ok"]))
+                    switch action {
+                    case "pause":
+                        MusicController.shared.pause(reason: .userExplicit)
+                    case "resume":
+                        try await MusicController.shared.userResume()
+                    case "skip":
+                        try await MusicController.shared.skip()
+                    case "stop":
+                        MusicController.shared.stop()
+                    default:
+                        completion(Self.functionMessage(name: name, json: [
+                            "status": "error",
+                            "error": "unknown_action",
+                            "message": "action must be one of pause, resume, skip, stop (got '\(action)')."
+                        ]))
+                        return
+                    }
+                    completion(Self.functionMessage(name: name, json: ["status": "ok", "action": action]))
                 } catch {
                     completion(Self.errorMessage(name: name, error: error))
                 }
-            }
-
-        case "skip_track":
-            Task { @MainActor in
-                do {
-                    try await MusicController.shared.skip()
-                    completion(Self.functionMessage(name: name, json: ["status": "ok"]))
-                } catch {
-                    completion(Self.errorMessage(name: name, error: error))
-                }
-            }
-
-        case "stop_music":
-            Task { @MainActor in
-                MusicController.shared.stop()
-                completion(Self.functionMessage(name: name, json: ["status": "ok"]))
             }
 
         case "get_music_status":

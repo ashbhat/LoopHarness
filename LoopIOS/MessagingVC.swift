@@ -86,6 +86,15 @@ class MessagingVC: UIViewController {
     var bottomConstraint: NSLayoutConstraint?
     
     var messageIdToAnimate: String?
+
+    /// Light tap fired when the user commits a message — a soft button-press
+    /// confirmation. Kept lazy so we don't spin the haptic engine for users
+    /// who never send (cold-launched into a transcript they only read).
+    private lazy var sendHapticGenerator = UIImpactFeedbackGenerator(style: .light)
+    /// Softer tap when the assistant's reply first lands — distinct from the
+    /// send haptic (lighter, gentler) so the two events feel like different
+    /// "sides" of the conversation rather than two identical bumps.
+    private lazy var responseHapticGenerator = UIImpactFeedbackGenerator(style: .soft)
     
     var base_system_prompt = """
 You are Loop, a personal AI agent and living memory that runs on the user's iPhone and Mac. You remember what the user tells you across conversations and devices, and you act on their behalf through your skills.
@@ -415,6 +424,18 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
             object: nil
         )
 
+        // Cover writers that go through iCloudKVSDefaults directly (e.g. the
+        // OnboardingCoordinator's voice-step writes to `audioMuted` and
+        // `ttsProvider`) — without this, picking a voice during onboarding
+        // updates the persisted state but leaves the nav-bar speaker button
+        // showing its old icon/menu, which then mis-toggles on first tap.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleKVSDefaultsChanged(_:)),
+            name: iCloudKVSDefaults.didChangeNotification,
+            object: nil
+        )
+
         // Pick up any attachments the SceneDelegate stashed during cold-start
         // before MessagingVC had loaded. Each call to `stageIncomingAttachment`
         // overwrites the chip, so the last one wins as the visible staging —
@@ -646,6 +667,18 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
     @objc private func handleTTSProviderChanged() {
         DispatchQueue.main.async { [weak self] in
             self?.muteButton?.menu = self?.buildSpeakerMenu()
+        }
+    }
+
+    /// Posted by `iCloudKVSDefaults` on every local write (and on KVS-external
+    /// mirroring). Filter on the keys that affect the nav-bar speaker button
+    /// — `audioMuted` flips the icon + menu wording, `ttsProvider` changes the
+    /// active row in the Voice submenu. Anything else is irrelevant here.
+    @objc private func handleKVSDefaultsChanged(_ note: Notification) {
+        let keys = (note.userInfo?["keys"] as? [String]) ?? []
+        guard keys.contains("audioMuted") || keys.contains("ttsProvider") else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.updateMuteButtonAppearance()
         }
     }
 
@@ -931,6 +964,7 @@ extension MessagingVC: MessageBoxDelegate {
         // Visual punctuation: the user just sent something. Pulses the
         // avatar(s) via MainVC's subscription on the coordinator.
         VoiceLoopCoordinator.shared.publishAcknowledgePulse()
+        sendHapticGenerator.impactOccurred()
 
         // Pull any staged file attachment off the input bar; the send button
         // is active even with empty text if there's a file ready, so we
@@ -1127,6 +1161,11 @@ extension MessagingVC: MessageBoxDelegate {
                 self.playMessageSynthesizer(message: message)
                 self.messageIdToAnimate = message.id
                 DispatchQueue.main.async {
+                    // Haptic hops to main with the reload so it fires right
+                    // as the bubble appears — and so UIFeedbackGenerator's
+                    // main-thread requirement is honored when processMessage
+                    // is invoked from URLSession's delegate queue.
+                    self.responseHapticGenerator.impactOccurred()
                     self.tableView.reloadData()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: {
                         self.scrollToLastMessage()
@@ -3026,21 +3065,71 @@ extension MessagingVC: OnboardingCoordinatorHost, OnboardingCardDelegate {
     /// `newMessageSent()` so MainVC's hero orb collapses into the nav-bar
     /// avatar — the empty-state hero shouldn't sit on top of onboarding
     /// cards.
+    ///
+    /// Assistant turns after the initial greeting route through the same
+    /// "Thinking…" shimmer + scroll + reveal beat the regular LLM path uses,
+    /// so onboarding feels like a real conversation rather than instant
+    /// scripted pops. User echoes and the very first greeting (no prior
+    /// message to thinking-after) skip the pause.
     func onboardingPostMessage(_ message: MessageStruct) {
         let conversation = ensureCurrentConversation()
+        let shouldShowThinking = (message.role == "assistant") && !self.messages.isEmpty
+        guard shouldShowThinking else {
+            appendOnboardingMessage(message, to: conversation)
+            return
+        }
+
+        // Reveal beat: shimmer cell sits at the bottom while we "think",
+        // then we swap it for the real bubble. Matches the regular chat
+        // pattern where `ai_state = .defaultThinking` adds an extra row
+        // (see numberOfRowsInSection) until the network call returns.
+        self.ai_state = .defaultThinking
+        tableView.reloadData()
+        DispatchQueue.main.async { [weak self] in
+            self?.scrollOnboardingToBottom()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.scrollOnboardingToBottom()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.onboardingThinkingDelay) { [weak self] in
+            guard let self = self else { return }
+            self.ai_state = .None
+            self.messageIdToAnimate = message.id
+            self.appendOnboardingMessage(message, to: conversation)
+        }
+    }
+
+    /// Shimmer-to-message reveal pause. Long enough to read as the assistant
+    /// thinking, short enough that the script doesn't drag.
+    static let onboardingThinkingDelay: TimeInterval = 0.8
+
+    /// Common append + reload + scroll used by both the immediate path
+    /// (user echoes, first greeting) and the post-thinking reveal path
+    /// (later assistant turns). Two-stage scroll: the first pass fires after
+    /// reloadData's layout so the cell self-sizes, the second covers the
+    /// case where the keyboard adjusted the table's bottom inset between
+    /// layout passes (common right after the user replies to .askName — the
+    /// LLM call returns async while the keyboard is still up, then
+    /// post-keyboard dismissal the inset shrinks and `.top` alignment would
+    /// otherwise leave the new bubble off-screen). `.bottom` keeps the
+    /// bubble pinned above the input bar in both states.
+    private func appendOnboardingMessage(_ message: MessageStruct, to conversation: SimpleConversation) {
         self.messages.append(message)
         conversationManager.addMessage(message, to: conversation)
         currentConversationEntity = conversationManager.currentConversation
         newMessageSent()
         tableView.reloadData()
-        // Two-stage scroll: the first pass fires after reloadData's layout
-        // so the cell self-sizes, the second covers the case where the
-        // keyboard adjusted the table's bottom inset between layout passes
-        // (common right after the user replies to .askName — the LLM call
-        // returns async while the keyboard is still up, then post-keyboard
-        // dismissal the inset shrinks and `.top` alignment would otherwise
-        // leave the new bubble off-screen). `.bottom` keeps the bubble
-        // pinned above the input bar in both states.
+        // Mirror the haptic beats the regular chat path fires (send haptic on
+        // user echo bubbles, response haptic on assistant turns). Onboarding
+        // bubbles short-circuit the LLM dispatch so without this they're
+        // silent, which makes the scripted flow feel less alive than the rest
+        // of the app.
+        if message.role == "user" {
+            sendHapticGenerator.impactOccurred()
+        } else if message.role == "assistant" {
+            responseHapticGenerator.impactOccurred()
+        }
         DispatchQueue.main.async { [weak self] in
             self?.scrollOnboardingToBottom()
         }
@@ -3089,12 +3178,12 @@ extension MessagingVC: OnboardingCoordinatorHost, OnboardingCardDelegate {
     }
 
     /// Coordinator → host: raise the keyboard so the user can start typing
-    /// straight after a scripted prompt (currently the greeting). Deferred
-    /// one runloop so the table reload that posted the prompt finishes
-    /// before the keyboard animation starts — otherwise the new bubble
-    /// gets briefly clipped under the rising keyboard before scroll catches up.
+    /// straight after a scripted prompt (currently the .askName step).
+    /// Deferred by the same beat as the assistant reveal so the keyboard
+    /// rises in sync with the prompt appearing — not on top of the
+    /// "Thinking…" shimmer.
     func onboardingFocusMessageBox() {
-        DispatchQueue.main.async { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.onboardingThinkingDelay) { [weak self] in
             self?.messageBox.textView.becomeFirstResponder()
         }
     }

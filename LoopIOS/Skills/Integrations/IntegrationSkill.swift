@@ -491,7 +491,6 @@ Tips:
         case .exa:                    return "exa"
         case .openAI:                 return "openai"
         case .anthropic:              return "anthropic"
-        case .kimi:                   return "kimi"
         case .fireworks:              return "fireworks"
         case .cursor:                 return "cursor"
         case .obsidianAPI:            return "obsidian_api"
@@ -548,7 +547,6 @@ Tips:
         switch n {
         case "openai", "open_ai", "open ai":                  return .openAI
         case "anthropic", "claude":                           return .anthropic
-        case "kimi", "moonshot":                              return .kimi
         case "fireworks":                                     return .fireworks
         case "deepgram":                                      return .deepgram
         case "elevenlabs", "eleven_labs", "eleven labs":      return .elevenLabs

@@ -393,8 +393,6 @@ final class AgentHarness {
             AnthropicChat.shared.chat(messages: rebuilt, tools: toolsToSend, completion: completion)
         case .openAI:
             OpenAIChat.shared.chat(messages: rebuilt, tools: toolsToSend, completion: completion)
-        case .kimi:
-            KimiChat.shared.chat(messages: rebuilt, tools: toolsToSend, completion: completion)
         case .fireworks:
             FireworksChat.shared.chat(messages: rebuilt, tools: toolsToSend, completion: completion)
         case .apple:
