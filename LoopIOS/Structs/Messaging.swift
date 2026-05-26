@@ -8,6 +8,33 @@
 import Foundation
 import CoreLocation
 
+// MARK: - Active-request tracker
+
+/// Lightweight thread-safe set of conversation ids that currently have an
+/// in-flight LLM request. The sidebar reads this (via `isActive(for:)`)
+/// alongside `SubAgentManager.aggregateLiveCount` to light up the
+/// running-indicator dot. Only the chat VC mutates the set.
+final class ActiveRequestTracker {
+    static let shared = ActiveRequestTracker()
+    private var ids: Set<String> = []
+    private let lock = NSLock()
+
+    func markActive(_ conversationId: String) {
+        lock.lock(); defer { lock.unlock() }
+        ids.insert(conversationId)
+    }
+
+    func markIdle(_ conversationId: String) {
+        lock.lock(); defer { lock.unlock() }
+        ids.remove(conversationId)
+    }
+
+    func isActive(for conversationId: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return ids.contains(conversationId)
+    }
+}
+
 enum MesssageActions {
     case upload_driver_id
 }
@@ -20,6 +47,9 @@ struct Conversation {
     let title: String
     let lastMessage: String
     let timestamp: Date
+    /// True when at least one agent/sub-agent/tool run is active for this
+    /// conversation. Drives the running-indicator dot in the sidebar row.
+    var isRunning: Bool = false
 }
 
 struct FunctionCallStruct {

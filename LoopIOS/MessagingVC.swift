@@ -320,6 +320,12 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
         }
     }
     
+    /// Conversation id captured when the latest LLM request was dispatched.
+    /// Responses arriving after the user has switched away are persisted to
+    /// this conversation (via the store) but NOT appended to the in-memory
+    /// `messages` array, keeping the on-screen table clean.
+    private var activeRequestConversationId: String?
+
     lazy var messages: [MessageStruct] = [
         MessageStruct(role: "system", content: base_system_prompt),
     ]
@@ -607,8 +613,10 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
     func loadConversation(_ conversation: SimpleConversation) {
         currentConversationEntity = conversation
         conversationManager.currentConversation = conversation
-        // Clear TTS timing state so a stale "| 2.03s to audio" suffix doesn't
-        // ride along onto a different conversation's messages by id collision.
+        // Reset the in-flight request scope so responses from a previous
+        // conversation's request don't bleed into this one's in-memory table.
+        activeRequestConversationId = nil
+        ai_state = .None
         ttsStatuses.removeAll()
         ttsStartTimes.removeAll()
         loadMessagesFromConversation(conversation)
@@ -633,6 +641,7 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
         let newConversation = conversationManager.createConversation(title: "New Chat \(timestamp)")
         currentConversationEntity = newConversation
         conversationManager.currentConversation = newConversation
+        activeRequestConversationId = nil
         ttsStatuses.removeAll()
         ttsStartTimes.removeAll()
         loadDefaultMessage()
@@ -853,31 +862,36 @@ extension MessagingVC: AgentLargeViewVoiceDelegate {
 extension MessagingVC: MessageBoxDelegate {
     
     func didSendMessageStruct(_ message: MessageStruct) {
-        // Ensure we have a current conversation
-        let conversation = ensureCurrentConversation()
+        // Use the conversation the in-flight request belongs to, falling
+        // back to the currently visible conversation.
+        let requestConvId = activeRequestConversationId ?? currentConversationEntity?.id
+        let conversation: SimpleConversation
+        if let id = requestConvId, let target = conversationManager.getConversation(by: id) {
+            conversation = target
+        } else {
+            conversation = ensureCurrentConversation()
+        }
 
-        // Add message to conversation
         conversationManager.addMessage(message, to: conversation)
 
-        // Update local conversation reference
-        currentConversationEntity = conversationManager.currentConversation
+        let isStillViewing = currentConversationEntity?.id == conversation.id
+        if isStillViewing {
+            currentConversationEntity = conversationManager.currentConversation
+            self.messages.append(message)
+            self.newMessageSent()
+        }
 
-        // Add to local messages array
-        self.messages.append(message)
-        self.newMessageSent()
-
-        // Tool just finished — flip the shimmer back to a generic "thinking"
-        // copy while the model decides what to do with the result.
         self.ai_state = .defaultThinking
         VoiceLoopCoordinator.shared.setState(.thinking)
         DispatchQueue.main.async {
-            self.tableView.reloadData()
+            if isStillViewing { self.tableView.reloadData() }
         }
 
+        let reqConvId = conversation.id
         Cloud.connection.chat(messages: self.chatContextMessages) { responseMessage, error in
             self.ai_state = .None
             if let responseMessage = responseMessage {
-                self.processMessage(message: responseMessage)
+                self.processMessage(message: responseMessage, requestConversationId: reqConvId)
             }
             else {
                 if #available(iOS 26.0, *) {
@@ -892,19 +906,21 @@ extension MessagingVC: MessageBoxDelegate {
                                 let response = try await session.respond(to: singlePrompt)
                                 let responseMessage = MessageStruct(role: "assistant", content: response.content, model: "Apple LLM")
 
-                                self.messages.append(responseMessage)
-                                self.messageIdToAnimate = responseMessage.id
-
-                                // Save error message to conversation
-                                self.conversationManager.addMessage(responseMessage, to: conversation)
+                                if let target = self.conversationManager.getConversation(by: reqConvId) {
+                                    self.conversationManager.addMessage(responseMessage, to: target)
+                                }
+                                let viewing = self.currentConversationEntity?.id == reqConvId
+                                if viewing {
+                                    self.messages.append(responseMessage)
+                                    self.messageIdToAnimate = responseMessage.id
+                                }
 
                                 DispatchQueue.main.async {
-                                    self.tableView.reloadData()
-                                    self.scrollToLastMessage()
-                                    // Without this the offline reply lands in
-                                    // the table silently — playMessageSynthesizer
-                                    // is what routes to speakOffline on no-net.
-                                    self.playMessageSynthesizer(message: responseMessage)
+                                    if viewing {
+                                        self.tableView.reloadData()
+                                        self.scrollToLastMessage()
+                                        self.playMessageSynthesizer(message: responseMessage)
+                                    }
                                 }
 
                             }
@@ -917,15 +933,21 @@ extension MessagingVC: MessageBoxDelegate {
 
 
                 let errorMessage = MessageStruct(role: "assistant", content: "Sorry – I'm having trouble connecting to Gemini. Please try again.")
-                self.messages.append(errorMessage)
-                self.messageIdToAnimate = errorMessage.id
-
-                // Save error message to conversation
-                self.conversationManager.addMessage(errorMessage, to: conversation)
+                ActiveRequestTracker.shared.markIdle(reqConvId)
+                if let target = self.conversationManager.getConversation(by: reqConvId) {
+                    self.conversationManager.addMessage(errorMessage, to: target)
+                }
+                let viewing = self.currentConversationEntity?.id == reqConvId
+                if viewing {
+                    self.messages.append(errorMessage)
+                    self.messageIdToAnimate = errorMessage.id
+                }
 
                 DispatchQueue.main.async {
-                    self.tableView.reloadData()
-                    self.scrollToLastMessage()
+                    if viewing {
+                        self.tableView.reloadData()
+                        self.scrollToLastMessage()
+                    }
                 }
                 EarconPlayer.shared.play(.error)
                 VoiceLoopCoordinator.shared.setState(.idle)
@@ -985,10 +1007,17 @@ extension MessagingVC: MessageBoxDelegate {
         })
 
 
+        // Capture the conversation id at request time so async callbacks
+        // route responses to the correct conversation even if the user
+        // switches away before the response arrives.
+        let requestConversationId = conversation.id
+        self.activeRequestConversationId = requestConversationId
+        ActiveRequestTracker.shared.markActive(requestConversationId)
+
         Cloud.connection.chat(messages: self.chatContextMessages) { responseMessage, error in
             self.ai_state = .None
             if let responseMessage = responseMessage {
-                self.processMessage(message: responseMessage)
+                self.processMessage(message: responseMessage, requestConversationId: requestConversationId)
             }
             else {
 
@@ -1006,19 +1035,24 @@ extension MessagingVC: MessageBoxDelegate {
                                 print(response)
                                 let responseMessage = MessageStruct(role: "assistant", content: response.content, model: "Apple LLM")
 
-                                self.messages.append(responseMessage)
-                                self.messageIdToAnimate = responseMessage.id
+                                // Persist to the conversation the request originated from
+                                if let target = self.conversationManager.getConversation(by: requestConversationId) {
+                                    self.conversationManager.addMessage(responseMessage, to: target)
+                                }
 
-                                // Save error message to conversation
-                                self.conversationManager.addMessage(responseMessage, to: conversation)
+                                // Only update the in-memory table if we're still viewing that conversation
+                                let isStillViewing = self.currentConversationEntity?.id == requestConversationId
+                                if isStillViewing {
+                                    self.messages.append(responseMessage)
+                                    self.messageIdToAnimate = responseMessage.id
+                                }
 
                                 DispatchQueue.main.async {
-                                    self.tableView.reloadData()
-                                    self.scrollToLastMessage()
-                                    // Without this the offline reply lands in
-                                    // the table silently — playMessageSynthesizer
-                                    // is what routes to speakOffline on no-net.
-                                    self.playMessageSynthesizer(message: responseMessage)
+                                    if isStillViewing {
+                                        self.tableView.reloadData()
+                                        self.scrollToLastMessage()
+                                        self.playMessageSynthesizer(message: responseMessage)
+                                    }
                                 }
 
                             }
@@ -1031,15 +1065,24 @@ extension MessagingVC: MessageBoxDelegate {
                 
                 
                 let errorMessage = MessageStruct(role: "assistant", content: "Sorry – I'm having trouble connecting to Gemini. Please try again.")
-                self.messages.append(errorMessage)
-                self.messageIdToAnimate = errorMessage.id
+                ActiveRequestTracker.shared.markIdle(requestConversationId)
 
-                // Save error message to conversation
-                self.conversationManager.addMessage(errorMessage, to: conversation)
+                // Persist to the originating conversation
+                if let target = self.conversationManager.getConversation(by: requestConversationId) {
+                    self.conversationManager.addMessage(errorMessage, to: target)
+                }
+
+                let isStillViewing = self.currentConversationEntity?.id == requestConversationId
+                if isStillViewing {
+                    self.messages.append(errorMessage)
+                    self.messageIdToAnimate = errorMessage.id
+                }
 
                 DispatchQueue.main.async {
-                    self.tableView.reloadData()
-                    self.scrollToLastMessage()
+                    if isStillViewing {
+                        self.tableView.reloadData()
+                        self.scrollToLastMessage()
+                    }
                 }
                 EarconPlayer.shared.play(.error)
                 VoiceLoopCoordinator.shared.setState(.idle)
@@ -1087,51 +1130,52 @@ extension MessagingVC: MessageBoxDelegate {
         }
     }
 
-    func processMessage(message: MessageStruct) {
+    func processMessage(message: MessageStruct, requestConversationId: String? = nil) {
+        let targetConvId = requestConversationId ?? activeRequestConversationId ?? currentConversationEntity?.id
 
         if message.role == "function" {
-            // Single-result entry point. The multi-call path below batches
-            // its own results, then re-enters chat directly, so it never
-            // round-trips through this branch.
             self.didSendMessageStruct(message)
             return
         }
 
+        let isViewing = currentConversationEntity?.id == targetConvId
+
         if message.functions.isEmpty {
-            // Plain assistant turn — no tool calls. Render normally; if the
-            // model returned an empty turn after a tool sequence (which can
-            // happen when it has nothing left to say), unwind the shimmer
-            // instead of dropping the user into a forever-spinning state.
+            // Terminal assistant response — mark the conversation idle.
+            if let id = targetConvId {
+                ActiveRequestTracker.shared.markIdle(id)
+            }
             guard message.content.count > 0 else {
                 self.ai_state = .None
                 VoiceLoopCoordinator.shared.setState(.idle)
                 DispatchQueue.main.async { self.tableView.reloadData() }
                 return
             }
-            let conversation = ensureCurrentConversation()
-            conversationManager.addMessage(message, to: conversation)
-            currentConversationEntity = conversationManager.currentConversation
-            self.messages.append(message)
-            // Publish the assistant turn to the activity log so the expanded
-            // AgentView can render it as a readable transcript below the orb.
-            // We publish here (not inside playMessageSynthesizer) because TTS
-            // is skippable — when the user has voice muted, the orb should
-            // still surface the text.
-            AgentActivityLog.shared.setAssistantTranscript(message.content)
-            VoiceLoopCoordinator.shared.publishAcknowledgePulse()
-            self.playMessageSynthesizer(message: message)
-            self.messageIdToAnimate = message.id
-            DispatchQueue.main.async {
-                self.tableView.reloadData()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: {
-                    self.scrollToLastMessage()
-                })
+
+            // Persist to the originating conversation
+            let conversation: SimpleConversation
+            if let id = targetConvId, let target = conversationManager.getConversation(by: id) {
+                conversation = target
+            } else {
+                conversation = ensureCurrentConversation()
             }
-            // Fire-and-forget title generation. Safe to call on every
-            // assistant turn — the service dedupes per conversation id,
-            // skips chats that already have a real title, and waits for a
-            // real user-and-assistant exchange (onboarding turns don't
-            // count) before actually firing.
+            conversationManager.addMessage(message, to: conversation)
+
+            if isViewing {
+                currentConversationEntity = conversationManager.currentConversation
+                self.messages.append(message)
+                AgentActivityLog.shared.setAssistantTranscript(message.content)
+                VoiceLoopCoordinator.shared.publishAcknowledgePulse()
+                self.playMessageSynthesizer(message: message)
+                self.messageIdToAnimate = message.id
+                DispatchQueue.main.async {
+                    self.tableView.reloadData()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: {
+                        self.scrollToLastMessage()
+                    })
+                }
+            }
+
             if let refreshed = conversationManager.getConversation(by: conversation.id) {
                 ConversationTitleService.shared.generateIfNeeded(
                     for: refreshed,
@@ -1141,17 +1185,15 @@ extension MessagingVC: MessageBoxDelegate {
             return
         }
 
-        // Assistant emitted ≥1 tool call(s). Update the shimmer for the first
-        // call so the UI flips before any tool starts running, then hand off
-        // to dispatchAllCalls which logs each call individually as it begins
-        // (so the expanded AgentView caption tracks every parallel tool, not
-        // just the first one in the batch).
+        // Assistant emitted ≥1 tool call(s).
         if let firstCall = message.functions.first {
             self.ai_state = .Thinking(text: self.statusText(for: firstCall))
         }
-        self.messages.append(message)
-        DispatchQueue.main.async { self.tableView.reloadData() }
-        self.dispatchAllCalls(in: message)
+        if isViewing {
+            self.messages.append(message)
+            DispatchQueue.main.async { self.tableView.reloadData() }
+        }
+        self.dispatchAllCalls(in: message, requestConversationId: targetConvId)
     }
 
     /// Fan out every call on an assistant turn. Anthropic and OpenAI both
@@ -1160,15 +1202,13 @@ extension MessagingVC: MessageBoxDelegate {
     /// what unlocks multi-step plans ("create note, move it, post link").
     /// Previously the harness only serviced the first call and silently
     /// dropped the rest, stalling the loop after one tool.
-    private func dispatchAllCalls(in message: MessageStruct) {
+    private func dispatchAllCalls(in message: MessageStruct, requestConversationId: String? = nil) {
         let calls = message.functions
         let total = calls.count
         var resultBuffer = Array<MessageStruct?>(repeating: nil, count: total)
         var pendingCount = total
+        let convId = requestConversationId
 
-        // Hot-loaded JS skills emit progress via the registry's logHandler;
-        // wire it into the shimmer once so any of the parallel calls can
-        // surface a live status line.
         DynamicSkillRegistry.shared.logHandler = { [weak self] _, line in
             DispatchQueue.main.async {
                 self?.ai_state = .Thinking(text: line)
@@ -1177,11 +1217,6 @@ extension MessagingVC: MessageBoxDelegate {
         }
 
         for (index, call) in calls.enumerated() {
-            // Stamp a key for the activity log so the expanded AgentView can
-            // pair toolCall→toolResult and render a live "running N tools"
-            // caption while the batch is in flight. Provider-issued ids are
-            // preferred when present; otherwise we synthesize one purely for
-            // the log (the wire layer falls back to its own nil-handling).
             let activityKey = call.callId ?? UUID().uuidString
             AgentActivityLog.shared.beginToolCall(
                 callId: activityKey,
@@ -1191,11 +1226,6 @@ extension MessagingVC: MessageBoxDelegate {
             self.dispatchCall(call) { [weak self] result in
                 guard let self = self else { return }
                 var r = result
-                // Pair the result back to the originating call so the wire
-                // layer can emit a structured `tool_result` (Anthropic) or
-                // `role:"tool"` (OpenAI) message instead of falling back to
-                // prose — without this binding the model can't reliably tell
-                // which result came from which call.
                 if r.callId == nil { r.callId = call.callId }
                 if r.name == nil   { r.name   = call.name }
                 DispatchQueue.main.async {
@@ -1206,41 +1236,45 @@ extension MessagingVC: MessageBoxDelegate {
                     resultBuffer[index] = r
                     pendingCount -= 1
                     if pendingCount == 0 {
-                        self.finishToolBatch(resultBuffer.compactMap { $0 })
+                        self.finishToolBatch(resultBuffer.compactMap { $0 }, requestConversationId: convId)
                     }
                 }
             }
         }
     }
 
-    /// Persist + append every tool result, then issue one follow-up chat.
-    /// Mirrors the post-append tail of `didSendMessageStruct` minus the
-    /// Apple-LLM offline branch (the harness routes to its own
-    /// `offlineRespond` when the device is offline and never reaches this
-    /// path with tools in flight).
-    private func finishToolBatch(_ results: [MessageStruct]) {
-        let conversation = ensureCurrentConversation()
+    private func finishToolBatch(_ results: [MessageStruct], requestConversationId: String? = nil) {
+        let targetId = requestConversationId ?? activeRequestConversationId ?? currentConversationEntity?.id
+        let conversation: SimpleConversation
+        if let id = targetId, let target = conversationManager.getConversation(by: id) {
+            conversation = target
+        } else {
+            conversation = ensureCurrentConversation()
+        }
+
+        let isViewing = currentConversationEntity?.id == conversation.id
         for r in results {
             conversationManager.addMessage(r, to: conversation)
-            self.messages.append(r)
+            if isViewing { self.messages.append(r) }
         }
-        currentConversationEntity = conversationManager.currentConversation
-        self.newMessageSent()
+        if isViewing {
+            currentConversationEntity = conversationManager.currentConversation
+            self.newMessageSent()
+        }
         self.ai_state = .defaultThinking
         VoiceLoopCoordinator.shared.setState(.thinking)
-        DispatchQueue.main.async { self.tableView.reloadData() }
+        if isViewing {
+            DispatchQueue.main.async { self.tableView.reloadData() }
+        }
 
+        let reqConvId = conversation.id
         Cloud.connection.chat(messages: self.chatContextMessages) { [weak self] responseMessage, error in
             guard let self = self else { return }
             self.ai_state = .None
             if let responseMessage = responseMessage {
-                self.processMessage(message: responseMessage)
+                self.processMessage(message: responseMessage, requestConversationId: reqConvId)
                 return
             }
-            // Surface the underlying detail when it's specific (wrong key,
-            // bad model id, quota) so the user can fix it instead of seeing
-            // a generic "couldn't connect" — same gate the user-message
-            // flow uses.
             let detail = error?.localizedDescription ?? ""
             let body: String
             if !detail.isEmpty && !detail.lowercased().hasPrefix("the operation couldn") {
@@ -1250,7 +1284,7 @@ extension MessagingVC: MessageBoxDelegate {
             }
             let errorMessage = MessageStruct(role: "assistant", content: body)
             DispatchQueue.main.async {
-                self.processMessage(message: errorMessage)
+                self.processMessage(message: errorMessage, requestConversationId: reqConvId)
             }
         }
     }
