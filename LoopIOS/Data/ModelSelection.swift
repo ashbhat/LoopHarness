@@ -13,6 +13,7 @@
 //    .openAI    → OpenAIChat   (direct, user's OPENAI_API_KEY)
 //    .anthropic → AnthropicChat (direct, user's ANTHROPIC_API_KEY)
 //    .kimi      → KimiChat      (direct, user's KIMI_API_KEY → Moonshot API)
+//    .fireworks → FireworksChat  (direct, user's FIREWORKS_API_KEY)
 //  Reachability still wins — offline always falls back to Apple, since the
 //  hosted providers can't work without a network. The selection is just the
 //  user's *preferred* model when the network is available.
@@ -27,6 +28,7 @@ enum ModelProvider: String, CaseIterable {
     case openAI
     case anthropic
     case kimi
+    case fireworks
 
     var displayName: String {
         switch self {
@@ -34,6 +36,7 @@ enum ModelProvider: String, CaseIterable {
         case .openAI:    return "OpenAI"
         case .anthropic: return "Anthropic"
         case .kimi:      return "Kimi"
+        case .fireworks: return "Fireworks"
         }
     }
 }
@@ -58,6 +61,9 @@ enum ModelSelection: String, CaseIterable {
     // Moonshot / Kimi.
     case kimiK26 = "kimiK26"
 
+    // Fireworks.
+    case fireworksKimiK26 = "fireworksKimiK26"
+
     var provider: ModelProvider {
         switch self {
         case .appleFoundation:
@@ -68,6 +74,8 @@ enum ModelSelection: String, CaseIterable {
             return .anthropic
         case .kimiK26:
             return .kimi
+        case .fireworksKimiK26:
+            return .fireworks
         }
     }
 
@@ -83,6 +91,7 @@ enum ModelSelection: String, CaseIterable {
         case .claudeSonnet46:  return "Claude Sonnet 4.6"
         case .claudeHaiku45:   return "Claude Haiku 4.5"
         case .kimiK26:         return "Kimi K2.6"
+        case .fireworksKimiK26: return "Kimi K2.6"
         }
     }
 
@@ -101,6 +110,7 @@ enum ModelSelection: String, CaseIterable {
         case .claudeSonnet46:  return "claude-sonnet-4-6"
         case .claudeHaiku45:   return "claude-haiku-4-5-20251001"
         case .kimiK26:         return "kimi-k2.6"
+        case .fireworksKimiK26: return "accounts/fireworks/models/kimi-k2p6"
         }
     }
 
@@ -129,6 +139,7 @@ enum ModelSelection: String, CaseIterable {
         case .openAI:    return .openAI
         case .anthropic: return .anthropic
         case .kimi:      return .kimi
+        case .fireworks: return .fireworks
         }
     }
 }

@@ -98,6 +98,7 @@ final class OnboardingCoordinator {
         static let modelClaude       = "model.claude"
         static let modelOpenAI       = "model.openai"
         static let modelKimi         = "model.kimi"
+        static let modelFireworks    = "model.fireworks"
         static let skipKey           = "key.skip"
         static let connectNotion     = "integration.notion"
         static let connectGitHub     = "integration.github"
@@ -223,6 +224,12 @@ final class OnboardingCoordinator {
                 pendingKeyProvider = .kimi
                 selectModel(for: .kimi)
                 advanceAfterModelPick(.kimi)
+            } else if lower.contains("fireworks") {
+                let verb = KeyStore.shared.source(for: .fireworks) != .missing ? "Use" : "Add"
+                commitAnswer(echo: "\(verb) Fireworks")
+                pendingKeyProvider = .fireworks
+                selectModel(for: .fireworks)
+                advanceAfterModelPick(.fireworks)
             } else if lower == "skip" {
                 commitAnswer(echo: "Skip")
                 pinAppleFoundationModel()
@@ -394,6 +401,13 @@ final class OnboardingCoordinator {
             pendingKeyProvider = .kimi
             selectModel(for: .kimi)
             advanceAfterModelPick(.kimi)
+
+        case (.greeting, ChipId.modelFireworks),
+             (.modelChoice, ChipId.modelFireworks):
+            commitAnswer(echo: label)
+            pendingKeyProvider = .fireworks
+            selectModel(for: .fireworks)
+            advanceAfterModelPick(.fireworks)
 
         case (.keyPaste, ChipId.skipKey):
             commitAnswer(echo: label)
@@ -578,13 +592,16 @@ final class OnboardingCoordinator {
                 ? "Use OpenAI" : "Add OpenAI"
             let kimiLabel = KeyStore.shared.source(for: .kimi) != .missing
                 ? "Use Kimi" : "Add Kimi"
+            let fireworksLabel = KeyStore.shared.source(for: .fireworks) != .missing
+                ? "Use Fireworks" : "Add Fireworks"
             return assistantMessage(
                 text: "Nice to meet you! **Let's get set up with this Harness.**\n\nI'm running inference with Apple's on-device model right now (free, private, but limited). Want something **more capable**? Plug in a key.",
                 card: .suggestions(options: [
-                    .init(id: ChipId.modelApple,  label: "Stay on Apple"),
-                    .init(id: ChipId.modelClaude, label: claudeLabel),
-                    .init(id: ChipId.modelOpenAI, label: openAILabel),
-                    .init(id: ChipId.modelKimi,   label: kimiLabel),
+                    .init(id: ChipId.modelApple,     label: "Stay on Apple"),
+                    .init(id: ChipId.modelClaude,    label: claudeLabel),
+                    .init(id: ChipId.modelOpenAI,    label: openAILabel),
+                    .init(id: ChipId.modelKimi,      label: kimiLabel),
+                    .init(id: ChipId.modelFireworks, label: fireworksLabel),
                 ]))
 
         case .askName:
@@ -773,6 +790,7 @@ final class OnboardingCoordinator {
         case .anthropic: selection = .claudeSonnet46
         case .openAI:    selection = .gpt55
         case .kimi:      selection = .kimiK26
+        case .fireworks: selection = .fireworksKimiK26
         default:         selection = nil
         }
         if let s = selection {

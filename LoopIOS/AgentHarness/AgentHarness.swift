@@ -395,6 +395,8 @@ final class AgentHarness {
             OpenAIChat.shared.chat(messages: rebuilt, tools: toolsToSend, completion: completion)
         case .kimi:
             KimiChat.shared.chat(messages: rebuilt, tools: toolsToSend, completion: completion)
+        case .fireworks:
+            FireworksChat.shared.chat(messages: rebuilt, tools: toolsToSend, completion: completion)
         case .apple:
             // Unreachable — `.apple` returned via offlineRespond above. Kept
             // so the switch stays exhaustive if providers are added.

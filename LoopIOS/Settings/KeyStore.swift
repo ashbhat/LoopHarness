@@ -29,6 +29,7 @@ final class KeyStore {
         case openAI         = "OPENAI_API_KEY"
         case anthropic      = "ANTHROPIC_API_KEY"
         case kimi           = "KIMI_API_KEY"
+        case fireworks      = "FIREWORKS_API_KEY"
         case cursor         = "CURSOR_API_KEY"
         case obsidianAPI    = "OBSIDIAN_API_KEY"
         case obsidianBaseURL = "OBSIDIAN_BASE_URL"
@@ -53,6 +54,7 @@ final class KeyStore {
             case .openAI:                 return "OpenAI"
             case .anthropic:              return "Anthropic"
             case .kimi:                   return "Kimi"
+            case .fireworks:              return "Fireworks"
             case .cursor:                 return "Cursor"
             case .obsidianAPI:            return "Obsidian API Key"
             case .obsidianBaseURL:        return "Obsidian Base URL"
@@ -79,6 +81,7 @@ final class KeyStore {
             case .openAI:                 return "Image generation + OpenAI TTS, and GPT models for the agent"
             case .anthropic:              return "Claude models for the agent"
             case .kimi:                   return "Moonshot Kimi models for the agent"
+            case .fireworks:              return "Fireworks inference platform (Kimi K2.6, etc.)"
             case .cursor:                 return "Cursor agent integration"
             case .obsidianAPI:            return "Bearer token for the Obsidian relay"
             case .obsidianBaseURL:        return "Public URL of the Obsidian relay"
@@ -103,7 +106,7 @@ final class KeyStore {
     /// second). Adding a new key means: (a) add the `Key` case above, (b)
     /// either add a new `Service` case here or extend an existing one's `keys`.
     enum Service: String, CaseIterable {
-        case openAI, anthropic, kimi, deepgram, elevenLabs, exa
+        case openAI, anthropic, kimi, fireworks, deepgram, elevenLabs, exa
         case cursor, devin
         case github, slack, notion, obsidian
         case twitter
@@ -114,6 +117,7 @@ final class KeyStore {
             case .openAI:     return "OpenAI"
             case .anthropic:  return "Anthropic"
             case .kimi:       return "Kimi"
+            case .fireworks:  return "Fireworks"
             case .deepgram:   return "Deepgram"
             case .elevenLabs: return "ElevenLabs"
             case .exa:        return "Exa"
@@ -136,6 +140,7 @@ final class KeyStore {
             case .openAI:     return "Image generation, OpenAI TTS, and GPT models for the agent"
             case .anthropic:  return "Claude models for the agent"
             case .kimi:       return "Moonshot Kimi models for the agent (Kimi K2.6)"
+            case .fireworks:  return "Fireworks inference platform — run Kimi K2.6 and other open models via Fireworks"
             case .deepgram:   return "Streaming STT + Aura TTS"
             case .elevenLabs: return "Expressive TTS voices"
             case .exa:        return "Web search + answer skill"
@@ -159,6 +164,7 @@ final class KeyStore {
             case .openAI:     return [.openAI]
             case .anthropic:  return [.anthropic]
             case .kimi:       return [.kimi]
+            case .fireworks:  return [.fireworks]
             case .deepgram:   return [.deepgram]
             case .elevenLabs: return [.elevenLabs]
             case .exa:        return [.exa]
