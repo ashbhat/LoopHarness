@@ -75,6 +75,13 @@ You may call terminal tools yourself ONLY when:
 - stop_terminal_session(session_id?) kills the shell. Use sparingly — sessions persist for review by default.
 - open_external_terminal(command, working_dir?, terminal_app?) opens Terminal.app instead. ONLY when the user asks for their real terminal, or for a heavily interactive TUI the in-app renderer can't handle.
 
+**SSH support — including exe.dev:**
+The in-app terminal has a real PTY, so SSH sessions work natively. Host-key acceptance for exe.dev (and *.exe.xyz VMs) is handled automatically — no manual "yes" prompt.
+- `ssh exe.dev` connects to the exe.dev lobby, an interactive REPL for VM management (ls, new, rm, etc.). It is NOT a regular shell — scp/sftp don't work against it.
+- `ssh <vm>.exe.xyz` connects to a specific VM and gives you a full shell (scp, sftp, port forwarding all work).
+- After running an SSH command, use read_terminal_output with wait_seconds=4..6 — SSH connection setup takes longer than a local command.
+- The session stays interactive: send follow-up input via run_terminal_command (e.g. `ls` inside the exe.dev lobby or shell commands inside a VM).
+
 Workflow tips for the sub-agent (or inline use):
 - Use wait_seconds=2..4 the first time you read after firing a command — shells flush prompts asynchronously.
 - Don't chain destructive commands (rm -rf, sudo, anything outside the working dir) without an explicit user instruction in this turn.
@@ -233,6 +240,12 @@ Workflow tips for the sub-agent (or inline use):
             return "opening terminal"
         case "run_terminal_command":
             if let cmd = call.arguments["command"] as? String, !cmd.isEmpty {
+                if TerminalSkill.isSSHCommand(cmd) {
+                    if TerminalSkill.isExeDevSSH(cmd) {
+                        return "connecting to exe.dev"
+                    }
+                    return "opening SSH connection"
+                }
                 let short = cmd.count > 40 ? String(cmd.prefix(40)) + "…" : cmd
                 return "running `\(short)`"
             }
@@ -366,17 +379,34 @@ Workflow tips for the sub-agent (or inline use):
             // scrollback. The same value is returned as the next-read
             // marker.
             let markerBefore = session.displayOutput.utf8.count
+
+            // SSH commands that target exe.dev or *.exe.xyz need the host-
+            // key auto-accepted before the real connection attempt,
+            // otherwise the interactive "Are you sure…" prompt hangs
+            // inside the agent loop with no human to type "yes". We
+            // provision a minimal ~/.ssh/config stanza once (idempotent)
+            // and give SSH commands a longer initial wait because TCP
+            // handshake + key exchange is slower than a local shell built-in.
+            let isSSH = TerminalSkill.isSSHCommand(command)
+            if isSSH {
+                TerminalSkill.ensureExeDevSSHConfig()
+            }
+
             guard session.runCommand(command) else {
                 completion(self.errorResult(name: name,
                                             content: "Failed to write to session \(session.id)."))
                 return
             }
-            // Give the shell a moment to start producing output. 1.2s is
-            // a compromise: short enough not to stall the model loop on a
-            // trivial command, long enough to capture the typical "ran ls
-            // → 50 file names" case without a follow-up read.
-            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1.2) {
+            // Give the shell a moment to start producing output. SSH
+            // commands get 3.5s (connection setup is slower); everything
+            // else keeps 1.2s to avoid stalling the model loop.
+            let waitTime: Double = isSSH ? 3.5 : 1.2
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + waitTime) {
                 let (delta, marker) = session.read(since: markerBefore)
+                var hint = "If the output looks incomplete, call read_terminal_output with this marker and wait_seconds=3 to grab the rest."
+                if isSSH {
+                    hint = "SSH session started. The connection is interactive — send follow-up commands via run_terminal_command. Use read_terminal_output with wait_seconds=4..6 to tail output."
+                }
                 let payload: [String: Any] = [
                     "status": "ok",
                     "session_id": session.id,
@@ -385,7 +415,7 @@ Workflow tips for the sub-agent (or inline use):
                     "output": TerminalSkill.trimForModel(delta),
                     "marker": marker,
                     "running": session.isRunning,
-                    "hint": "If the output looks incomplete, call read_terminal_output with this marker and wait_seconds=3 to grab the rest.",
+                    "hint": hint,
                 ]
                 completion(self.jsonResult(name: name, payload: payload))
             }
@@ -660,6 +690,79 @@ Workflow tips for the sub-agent (or inline use):
         return .failure(NSError(domain: "TerminalSkill",
                                 code: 2,
                                 userInfo: [NSLocalizedDescriptionKey: "Could not compile AppleScript"]))
+    }
+
+    // MARK: - SSH helpers
+
+    /// Returns true when the command line looks like an SSH invocation.
+    /// Covers `ssh exe.dev`, `ssh user@host`, `ssh -i key host`, etc.
+    static func isSSHCommand(_ command: String) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Fast path: starts with "ssh " or is exactly "ssh"
+        if trimmed == "ssh" || trimmed.hasPrefix("ssh ") {
+            return true
+        }
+        // Pipe / chain: `… | ssh …`, `… && ssh …`, `… ; ssh …`
+        let operators = ["|", "&&", ";"]
+        for op in operators {
+            if let range = trimmed.range(of: "\(op) ssh ") ?? trimmed.range(of: "\(op) ssh") {
+                _ = range // suppress unused warning
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Returns true when the SSH command targets exe.dev or *.exe.xyz.
+    static func isExeDevSSH(_ command: String) -> Bool {
+        let lower = command.lowercased()
+        return lower.contains("exe.dev") || lower.contains(".exe.xyz")
+    }
+
+    /// Idempotent: ensures `~/.ssh/config` has a stanza that auto-accepts
+    /// new host keys for exe.dev and *.exe.xyz. Without this, the first
+    /// connection from a fresh machine prompts "Are you sure you want to
+    /// continue connecting (yes/no/[fingerprint])?", which blocks inside
+    /// the agent loop because no human is typing "yes".
+    ///
+    /// The stanza uses `StrictHostKeyChecking accept-new` rather than `no`
+    /// so known_hosts TOFU still works — a changed key still raises an
+    /// error, protecting against MITM after the initial connection.
+    static func ensureExeDevSSHConfig() {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let sshDir = (home as NSString).appendingPathComponent(".ssh")
+        let configPath = (sshDir as NSString).appendingPathComponent("config")
+        let fm = FileManager.default
+
+        // Ensure ~/.ssh exists with correct permissions.
+        if !fm.fileExists(atPath: sshDir) {
+            try? fm.createDirectory(atPath: sshDir,
+                                    withIntermediateDirectories: true)
+            chmod(sshDir, 0o700)
+        }
+
+        let marker = "# Loop-managed: exe.dev host-key auto-accept"
+        let stanza = """
+        \n\(marker)
+        Host exe.dev *.exe.xyz
+            StrictHostKeyChecking accept-new
+            UserKnownHostsFile ~/.ssh/known_hosts
+        """
+
+        if fm.fileExists(atPath: configPath),
+           let existing = try? String(contentsOfFile: configPath, encoding: .utf8) {
+            if existing.contains(marker) { return }
+            // Append to existing config.
+            try? (existing + stanza).write(toFile: configPath,
+                                           atomically: true,
+                                           encoding: .utf8)
+        } else {
+            // Create new config.
+            try? stanza.write(toFile: configPath,
+                              atomically: true,
+                              encoding: .utf8)
+            chmod(configPath, 0o600)
+        }
     }
 
     // MARK: - Shared helpers

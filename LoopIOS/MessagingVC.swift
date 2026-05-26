@@ -934,6 +934,10 @@ extension MessagingVC: MessageBoxDelegate {
     }
 
     func didSendMessageText(_ message: String) {
+        // Cancel any in-flight TTS immediately — the user just sent a new
+        // message, so continuing to speak the previous response is stale.
+        stopSpeaking()
+
         // Mid-onboarding text input goes to the coordinator first. If it
         // consumes the message (echoes a bubble, advances the script, or
         // re-posts the current step), short-circuit before the regular
