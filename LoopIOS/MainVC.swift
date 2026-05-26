@@ -24,11 +24,10 @@ class MainVC: MessagingVC {
     /// later calls run the pop when this flips.
     private var lastVisibilityEmpty: Bool?
 
-    /// Retained transitioning delegate that drives the 3D pop between the
-    /// nav-bar avatar and `AgentLargeVC`. UIKit holds it weakly during a
-    /// presentation, so MainVC keeps the strong reference alive across
-    /// present and dismiss.
-    private var avatarTransition: AvatarPopTransitionDelegate?
+    /// The immersive agent view when it is hosted as a child view
+    /// controller (instead of a fullscreen modal). Kept alive so dismiss
+    /// can tear it down cleanly.
+    private var agentLargeVC: AgentLargeVC?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -80,30 +79,88 @@ class MainVC: MessagingVC {
         self.avatar = av
     }
 
-    /// Push the immersive agent view as a full-screen modal. Uses a custom
-    /// `AvatarPopTransitionDelegate` so the small nav-bar orb visually
-    /// "pops" through space into the AgentLargeView's 300pt hero orb,
-    /// rather than the old plain crossfade. The same delegate drives the
-    /// reverse pop on dismiss.
+    /// Show the immersive agent view as a child view controller instead
+    /// of a fullscreen modal. The view is inserted below the message box
+    /// in the z-order so the chat text input stays tappable and editable
+    /// while the avatar is visible. The same `AvatarPopAnimator.play`
+    /// transition is used to fly the orb between the nav bar and the
+    /// hero slot.
     @objc func presentAgentLargeView() {
+        guard agentLargeVC == nil else { return }
+
         let vc = AgentLargeVC()
-        vc.modalPresentationStyle = .fullScreen
-        // MainVC inherits from MessagingVC, which owns the actual MessageBox
-        // + voice pipeline — hand `self` to the agent view so its
-        // press-and-hold pill drives the same recording path the in-chat mic
-        // button uses, without hoisting STT into a shared coordinator (Phase
-        // B work, intentionally out of scope here).
         vc.voiceDelegate = self
-        let delegate = AvatarPopTransitionDelegate(sourceAvatar: avatar) { presented in
-            (presented as? AgentLargeVC)?.agentView.avatar
+        vc.onDismiss = { [weak self] panDismiss in
+            self?.dismissAgentLargeView(panDismiss: panDismiss)
         }
-        vc.transitioningDelegate = delegate
-        // Loading the view here forces AgentLargeView (and its avatar) into
-        // existence before the animator runs — the present animator samples
-        // the destination avatar's frame inside `animateTransition`.
-        _ = vc.view
-        self.avatarTransition = delegate
-        present(vc, animated: true)
+
+        addChild(vc)
+        vc.view.translatesAutoresizingMaskIntoConstraints = false
+        // Key fix: insert below the messageBox so the text input remains
+        // on top and tappable while the immersive avatar is visible.
+        view.insertSubview(vc.view, belowSubview: messageBox)
+        NSLayoutConstraint.activate([
+            vc.view.topAnchor.constraint(equalTo: view.topAnchor),
+            vc.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            vc.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            vc.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        vc.didMove(toParent: self)
+        agentLargeVC = vc
+
+        // Fade the chrome in while the pop flies.
+        vc.view.alpha = 0
+        vc.view.layoutIfNeeded()
+        UIView.animate(withDuration: 0.35) { vc.view.alpha = 1 }
+
+        // Fly the orb from the nav-bar avatar to the hero position.
+        if let source = avatar,
+           let window = view.window {
+            let dest = vc.agentView.avatar
+            AvatarPopAnimator.play(from: source, to: dest, in: window, duration: 0.65) {
+                source.isHidden = false
+                dest.isHidden = false
+            }
+        }
+
+        navigationController?.setNavigationBarHidden(true, animated: true)
+    }
+
+    /// Tear down the child agent view with a reverse pop (tap) or a
+    /// slide-away (pan). Restores the nav bar and cleans up the child VC.
+    private func dismissAgentLargeView(panDismiss: Bool = false) {
+        guard let vc = agentLargeVC else { return }
+
+        // Fly the orb back to the nav-bar avatar on a tap dismiss.
+        if !panDismiss,
+           let dest = avatar,
+           let window = view.window {
+            let source = vc.agentView.avatar
+            AvatarPopAnimator.play(from: source, to: dest, in: window, duration: 0.55) {
+                dest.isHidden = false
+            }
+        }
+
+        navigationController?.setNavigationBarHidden(false, animated: true)
+
+        UIView.animate(
+            withDuration: 0.3,
+            delay: panDismiss ? 0 : 0.1,
+            options: [.curveEaseIn],
+            animations: {
+                vc.view.alpha = 0
+                if panDismiss {
+                    let currentY = vc.view.transform.ty
+                    vc.view.transform = CGAffineTransform(translationX: 0, y: max(currentY, 200))
+                }
+            },
+            completion: { [weak self] _ in
+                vc.willMove(toParent: nil)
+                vc.view.removeFromSuperview()
+                vc.removeFromParent()
+                self?.agentLargeVC = nil
+            }
+        )
     }
 
     /// Hero avatar that fills the empty-state slot above the message box.
@@ -114,7 +171,11 @@ class MainVC: MessagingVC {
         // the screen, leaving room for the message box below.
         let big = AvatarView(gridW: 21, gridH: 21, pixelSize: 12, baseRadius: 6.0)
         big.translatesAutoresizingMaskIntoConstraints = false
-        self.view.addSubview(big)
+        // Insert below the message box so the hero never blocks the text
+        // input. The hero sits in the upper half of the screen and shouldn't
+        // physically overlap the input bar, but keeping it behind in z-order
+        // is a defensive safety net that costs nothing.
+        self.view.insertSubview(big, belowSubview: messageBox)
 
         NSLayoutConstraint.activate([
             big.centerXAnchor.constraint(equalTo: self.view.centerXAnchor),
