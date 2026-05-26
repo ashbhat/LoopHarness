@@ -152,6 +152,29 @@ enum ModelSelection: String, CaseIterable {
         }
     }
 
+    /// Total context window size in tokens, or `nil` when the limit is
+    /// unknown (Apple on-device model). Used to compute the "Context X%"
+    /// byline chip after each assistant response.
+    var contextWindowSize: Int? {
+        switch self {
+        case .appleFoundation:  return nil
+        case .gpt55:            return 1_048_576
+        case .gpt51:            return 1_048_576
+        case .gpt41:            return 1_048_576
+        case .gpt4o:            return 128_000
+        case .claudeOpus47:     return 200_000
+        case .claudeSonnet46:   return 200_000
+        case .claudeHaiku45:    return 200_000
+        case .fireworksKimiK26: return 131_072
+        }
+    }
+
+    /// Look up a model's context window by its `stampedMessageModel` label.
+    /// Returns `nil` when the label doesn't match any known model.
+    static func contextWindowSize(forStamp stamp: String) -> Int? {
+        allCases.first { $0.stampedMessageModel == stamp }?.contextWindowSize
+    }
+
     /// Models for a provider, in menu order.
     static func models(for provider: ModelProvider) -> [ModelSelection] {
         allCases.filter { $0.provider == provider }

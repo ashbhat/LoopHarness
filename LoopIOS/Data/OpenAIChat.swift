@@ -141,11 +141,21 @@ final class OpenAIChat {
                 calls = []
             }
             let content = (message["content"] as? String) ?? ""
+            var usage: TokenUsage? = nil
+            if let u = json["usage"] as? [String: Any],
+               let prompt = u["prompt_tokens"] as? Int,
+               let comp = u["completion_tokens"] as? Int,
+               let total = u["total_tokens"] as? Int {
+                usage = TokenUsage(promptTokens: prompt,
+                                   completionTokens: comp,
+                                   totalTokens: total)
+            }
             let msg = MessageStruct(
                 role: "assistant",
                 content: content,
                 model: ModelSelectionStore.current.stampedMessageModel,
-                functions: calls)
+                functions: calls,
+                tokenUsage: usage)
             completion(msg, nil)
         }
         task.resume()

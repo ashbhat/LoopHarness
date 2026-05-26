@@ -73,6 +73,21 @@ struct FunctionCallStruct {
     var conversationId: String? = nil
 }
 
+/// Provider-returned token counts for a single completion.
+struct TokenUsage {
+    var promptTokens: Int
+    var completionTokens: Int
+    var totalTokens: Int
+
+    /// Percentage of the model's context window consumed by the prompt,
+    /// or `nil` when the window size is unknown.
+    func contextPercent(windowSize: Int?) -> Int? {
+        guard let window = windowSize, window > 0 else { return nil }
+        let pct = Int((Double(totalTokens) / Double(window)) * 100)
+        return min(pct, 100)
+    }
+}
+
 struct MessageStruct {
     var id: String = UUID().uuidString
     var role: String
@@ -130,6 +145,11 @@ struct MessageStruct {
     /// thinking is enabled; the field must be replayed on subsequent requests
     /// or the API rejects the message with "reasoning_content is missing".
     var reasoningContent: String? = nil
+    /// Provider-returned token usage for this assistant turn. Populated by
+    /// OpenAIChat / AnthropicChat / FireworksChat from the response's
+    /// `usage` object. `nil` for on-device Apple responses and older
+    /// persisted messages.
+    var tokenUsage: TokenUsage? = nil
 
     /// Explicit init that still accepts `function:` as a singular optional —
     /// keeps existing call sites compiling now that `function` is a computed
@@ -149,7 +169,8 @@ struct MessageStruct {
          fileAttachment: FileAttachment? = nil,
          mapAttachment: MapAttachment? = nil,
          onboardingCard: OnboardingCardKind? = nil,
-         reasoningContent: String? = nil) {
+         reasoningContent: String? = nil,
+         tokenUsage: TokenUsage? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -171,6 +192,7 @@ struct MessageStruct {
         self.mapAttachment = mapAttachment
         self.onboardingCard = onboardingCard
         self.reasoningContent = reasoningContent
+        self.tokenUsage = tokenUsage
     }
 
     /// Generic JSON representation of the message. Provider-specific chat
