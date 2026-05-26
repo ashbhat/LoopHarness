@@ -125,6 +125,7 @@ final class IntegrationsVC: UIViewController {
             githubIntegration(),
             devinIntegration(),
             twitterIntegration(),
+            yelpIntegration(),
             healthIntegration(),
         ]
 
@@ -395,6 +396,48 @@ final class IntegrationsVC: UIViewController {
             stack.append(KeyEditVC(focusing: .xAPIKey))
             nav.setViewControllers(stack, animated: true)
         }
+    }
+
+    // MARK: - Yelp
+
+    private func yelpIntegration() -> Integration {
+        let hasKey = !((KeyStore.shared.value(for: .yelp) ?? "").isEmpty)
+        return Integration(
+            title: "Yelp",
+            subtitle: hasKey
+                ? "Connected \u{00B7} Yelp Fusion API key"
+                : "Tap to add your Yelp API key",
+            icon: "fork.knife",
+            tint: .systemRed,
+            status: hasKey ? .connected : .notConnected,
+            handler: { vc in vc.handleYelpTap() }
+        )
+    }
+
+    private func handleYelpTap() {
+        let hasKey = !((KeyStore.shared.value(for: .yelp) ?? "").isEmpty)
+        if hasKey {
+            let alert = UIAlertController(
+                title: "Yelp connected",
+                message: "Loop can search local businesses via Yelp Fusion. You can replace or remove the key in Settings \u{2192} Keys.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "Edit Key", style: .default) { [weak self] _ in
+                self?.pushYelpKeyEditor()
+            })
+            alert.addAction(UIAlertAction(title: "Done", style: .cancel))
+            present(alert, animated: true)
+        } else {
+            pushYelpKeyEditor()
+        }
+    }
+
+    private func pushYelpKeyEditor() {
+        guard let nav = navigationController else { return }
+        var stack = nav.viewControllers
+        stack.append(KeysVC())
+        stack.append(KeyEditVC(focusing: .yelp))
+        nav.setViewControllers(stack, animated: true)
     }
 
     // MARK: - Apple Health

@@ -172,6 +172,7 @@ fileprivate final class IntegrationsListViewController: NSViewController, NSTabl
             slackIntegration(),
             devinIntegration(),
             twitterIntegration(),
+            yelpIntegration(),
         ]
 
         tableView.reloadData()
@@ -323,6 +324,38 @@ fileprivate final class IntegrationsListViewController: NSViewController, NSTabl
             }
         } else {
             SettingsWindowController.shared.showKeys(selecting: .xAPIKey)
+        }
+    }
+
+    // MARK: Yelp handler
+
+    private func yelpIntegration() -> Integration {
+        let hasKey = !((KeyStore.shared.value(for: .yelp) ?? "").isEmpty)
+        return Integration(
+            title: "Yelp",
+            subtitle: hasKey
+                ? "Connected \u{00B7} Yelp Fusion API key"
+                : "Click to add your Yelp API key",
+            icon: "fork.knife",
+            tint: .systemRed,
+            status: hasKey ? .connected : .notConnected,
+            handler: { vc in vc.handleYelpTap() }
+        )
+    }
+
+    fileprivate func handleYelpTap() {
+        let hasKey = !((KeyStore.shared.value(for: .yelp) ?? "").isEmpty)
+        if hasKey {
+            let alert = NSAlert()
+            alert.messageText = "Yelp connected"
+            alert.informativeText = "Loop can search local businesses via Yelp Fusion. You can replace or remove the key in Settings \u{2192} Keys."
+            alert.addButton(withTitle: "Edit Key")
+            alert.addButton(withTitle: "Done")
+            if alert.runModal() == .alertFirstButtonReturn {
+                SettingsWindowController.shared.showKeys(selecting: .yelp)
+            }
+        } else {
+            SettingsWindowController.shared.showKeys(selecting: .yelp)
         }
     }
 

@@ -44,6 +44,7 @@ final class KeyStore {
         case xAccessToken           = "X_ACCESS_TOKEN"
         case xAccessTokenSecret     = "X_ACCESS_TOKEN_SECRET"
         case sfBayTransit           = "SF_BAY_511_API_KEY"
+        case yelp                  = "YELP_API_KEY"
 
         /// User-facing label shown in Settings.
         var displayName: String {
@@ -69,6 +70,7 @@ final class KeyStore {
             case .xAccessToken:           return "X Access Token"
             case .xAccessTokenSecret:     return "X Access Token Secret"
             case .sfBayTransit:           return "511 SF Bay API Key"
+            case .yelp:                    return "Yelp"
             }
         }
 
@@ -96,6 +98,7 @@ final class KeyStore {
             case .xAccessToken:           return "User-level access token with read+write permission from developer.x.com"
             case .xAccessTokenSecret:     return "User-level access token secret — shown once at generation time"
             case .sfBayTransit:           return "Free API token from 511.org/open-data/token — powers real-time Muni arrival predictions"
+            case .yelp:                    return "Yelp Fusion API key for local business search · get one free at yelp.com/developers"
             }
         }
     }
@@ -111,6 +114,7 @@ final class KeyStore {
         case github, slack, notion, obsidian
         case twitter
         case sfBayTransit
+        case yelp
 
         /// Row title in the list + window title in the editor.
         var displayName: String {
@@ -129,6 +133,7 @@ final class KeyStore {
             case .obsidian:   return "Obsidian"
             case .twitter:    return "X (Twitter)"
             case .sfBayTransit: return "511 SF Bay"
+            case .yelp:       return "Yelp"
             }
         }
 
@@ -152,6 +157,7 @@ final class KeyStore {
             case .obsidian:   return "Read and write your Obsidian vault through a self-hosted relay"
             case .twitter:    return "Post tweets to X (Twitter) with OAuth 1.0a"
             case .sfBayTransit: return "Real-time SF Muni bus/train arrival predictions via the 511 API"
+            case .yelp:       return "Search local businesses, restaurants, and services via Yelp Fusion"
             }
         }
 
@@ -176,6 +182,7 @@ final class KeyStore {
             case .obsidian:   return [.obsidianAPI, .obsidianBaseURL, .obsidianVaultName]
             case .twitter:    return [.xAPIKey, .xAPISecret, .xAccessToken, .xAccessTokenSecret]
             case .sfBayTransit: return [.sfBayTransit]
+            case .yelp:       return [.yelp]
             }
         }
 

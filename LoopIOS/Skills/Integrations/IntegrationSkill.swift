@@ -48,10 +48,10 @@ final class IntegrationSkill {
 
     static let systemPromptFragment: String = """
 You can manage the user's integrations and API keys directly:
-- list_integrations: enumerate the integrations Loop knows about (Google Calendar via EventKit, Notion, Gmail, Slack, Apple Health) and their current connection state. Notion and Slack are token-backed (ntn_… integration token and xoxp- user token respectively, both stored in the Keychain) — status flips to "connected" once the user pastes the relevant key. Apple Health is OS-permission-backed (like Calendar).
+- list_integrations: enumerate the integrations Loop knows about (Google Calendar via EventKit, Notion, Gmail, Slack, Apple Health, Yelp) and their current connection state. Notion and Slack are token-backed (ntn_… integration token and xoxp- user token respectively, both stored in the Keychain) — status flips to "connected" once the user pastes the relevant key. Apple Health is OS-permission-backed (like Calendar).
 - connect_integration: kick off the connect flow for a named integration. For Google Calendar this triggers the OS permission prompt when status is undetermined; if access was previously denied, the tool returns a hint telling you to call open_integration_settings with target="calendar_privacy". For Slack, this returns a `needs_api_key` payload with instructions to walk the user through minting an xoxp- token and pasting it in Settings → Keys → Slack User Token.
 - open_integration_settings: surfaces the in-app Integrations panel (target="in_app", default) or the system Privacy pane (target="calendar_privacy"). Use this when the user says "open integrations" / "let me see my settings".
-- list_api_keys: reports which API keys are currently set (Deepgram, ElevenLabs, OpenAI, Exa, Cursor, Obsidian). Values are never returned — only whether each is present.
+- list_api_keys: reports which API keys are currently set (Deepgram, ElevenLabs, OpenAI, Exa, Cursor, Obsidian, Yelp). Values are never returned — only whether each is present.
 - set_api_key: store a value in the keychain. Accepts either the canonical name ("OPENAI_API_KEY") or a friendly alias ("openai"). IMPORTANT: voice transcription is lossy — always read the value back to the user character-by-character and confirm before calling this tool. If the user typed the value, you can call it directly.
 
 Tips:
@@ -85,7 +85,7 @@ Tips:
                     "properties": [
                         "name": [
                             "type": "string",
-                            "description": "Integration identifier. One of: calendar, notion, gmail, slack, health."
+                            "description": "Integration identifier. One of: calendar, notion, gmail, slack, health, yelp."
                         ]
                     ],
                     "required": ["name"]
@@ -135,7 +135,7 @@ Tips:
                     "properties": [
                         "name": [
                             "type": "string",
-                            "description": "Key identifier. Aliases accepted: openai, deepgram, elevenlabs, exa, cursor, obsidian_api, obsidian_base_url, obsidian_vault_name."
+                            "description": "Key identifier. Aliases accepted: openai, deepgram, elevenlabs, exa, cursor, obsidian_api, obsidian_base_url, obsidian_vault_name, yelp."
                         ],
                         "value": [
                             "type": "string",
@@ -255,6 +255,15 @@ Tips:
                 ? "Paste a personal xoxp- token in Settings → Keys → Slack User Token. The user can mint one at api.slack.com/apps with the scopes listed in Specs/3. Integrations Spec.md."
                 : "Connected via personal user token. Slack tools are live."
         ]
+        let yelpKey = KeyStore.shared.value(for: .yelp) ?? ""
+        let yelp: [String: Any] = [
+            "name": "yelp",
+            "display_name": "Yelp",
+            "status": yelpKey.isEmpty ? "not_connected" : "connected",
+            "hint": yelpKey.isEmpty
+                ? "Paste a Yelp Fusion API key in Settings \u{2192} Keys \u{2192} Yelp. Get one free at https://www.yelp.com/developers."
+                : "Connected via Yelp Fusion API key. Yelp search tools are live."
+        ]
         #if canImport(HealthKit) && os(iOS)
         let healthStatus = HealthKitManager.shared.currentAuthorizationStatus
         let health: [String: Any] = [
@@ -263,7 +272,7 @@ Tips:
             "status": healthStatus.rawValue,
             "hint": healthHint(healthStatus)
         ]
-        return [calendar, notion, gmail, slack, health]
+        return [calendar, notion, gmail, slack, yelp, health]
         #else
         let health: [String: Any] = [
             "name": "health",
@@ -271,7 +280,7 @@ Tips:
             "status": "unavailable",
             "hint": "HealthKit is not available on this platform."
         ]
-        return [calendar, notion, gmail, slack, health]
+        return [calendar, notion, gmail, slack, yelp, health]
         #endif
     }
 
@@ -424,11 +433,27 @@ Tips:
             ]))
             #endif
 
+        case "yelp":
+            let key = KeyStore.shared.value(for: .yelp) ?? ""
+            if !key.isEmpty {
+                completion(Self.functionMessage(name: toolName, payload: [
+                    "name": "yelp",
+                    "status": "already_connected",
+                    "message": "Yelp is already connected via a Fusion API key. Yelp search tools are live."
+                ]))
+            } else {
+                completion(Self.functionMessage(name: toolName, payload: [
+                    "name": "yelp",
+                    "status": "needs_api_key",
+                    "next_action": "Tell the user to paste their Yelp Fusion API key in Settings \u{2192} Keys \u{2192} Yelp. They can create one free at https://www.yelp.com/developers \u{2192} Create App \u{2192} copy the API Key."
+                ]))
+            }
+
         default:
             completion(Self.functionMessage(name: toolName, payload: [
                 "error": "unknown_integration",
                 "name": which,
-                "hint": "Known integrations: calendar, notion, gmail, slack, health."
+                "hint": "Known integrations: calendar, notion, gmail, slack, health, yelp."
             ]))
         }
     }
@@ -507,6 +532,7 @@ Tips:
         case .xAccessToken:           return "x_access_token"
         case .xAccessTokenSecret:     return "x_access_token_secret"
         case .sfBayTransit:           return "sf_bay_transit"
+        case .yelp:                    return "yelp"
         }
     }
 
@@ -569,6 +595,7 @@ Tips:
              "twitter_access_token_secret":                   return .xAccessTokenSecret
         case "sf_bay_transit", "sf_bay_511",
              "511", "511_sf_bay":                             return .sfBayTransit
+        case "yelp", "yelp_api_key":                         return .yelp
         default:                                              return nil
         }
     }

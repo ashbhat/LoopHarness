@@ -128,6 +128,7 @@ final class AgentHarness {
             ("Devin",            "Dispatch coding tasks to Devin cloud agents (opens PRs, live transcript)"),
             ("X (Twitter)",      "Post tweets to X (Twitter) with confirmation"),
             ("SSH",              "Execute shell commands on a remote host via SSH"),
+            ("Yelp",             "Search local businesses, restaurants, and services via Yelp Fusion"),
         ]
         #if canImport(HealthKit) && os(iOS)
         catalog.append(("Apple Health", "Read-only access to steps, distance, workouts, heart rate, sleep, body mass"))
@@ -162,6 +163,7 @@ final class AgentHarness {
             DevinSkill.systemPromptFragment,
             TwitterSkill.systemPromptFragment,
             SSHSkill.systemPromptFragment,
+            YelpSkill.systemPromptFragment,
         ]
         #if canImport(HealthKit) && os(iOS)
         fragments.append(HealthSkill.systemPromptFragment)
