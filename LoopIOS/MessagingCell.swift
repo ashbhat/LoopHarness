@@ -450,21 +450,21 @@ class MessagingCell: UITableViewCell {
         // Inline image attachment (image_spec) takes a separate code path so
         // we don't need to interleave it with text-bubble layout.
         if let attachment = data.imageAttachment {
-            applyImageAttachment(attachment, modelLabelText: data.model)
+            applyImageAttachment(attachment, modelLabelText: modelText(for: data))
             return
         }
 
         // Inline PDF attachment (pdf_spec). Renders as a card with the
         // page-1 thumbnail + title + page count + Preview/Share buttons.
         if let pdfAttachment = data.pdfAttachment {
-            applyPDFAttachment(pdfAttachment, modelLabelText: data.model)
+            applyPDFAttachment(pdfAttachment, modelLabelText: modelText(for: data))
             return
         }
 
         // Inline map embed — MKMapView with one pin per place. Callouts
         // open Apple Maps for that destination.
         if let mapAttachment = data.mapAttachment {
-            applyMapAttachment(mapAttachment, modelLabelText: data.model)
+            applyMapAttachment(mapAttachment, modelLabelText: modelText(for: data))
             return
         }
 
@@ -560,8 +560,9 @@ class MessagingCell: UITableViewCell {
 //            animatingtextView.text = data.content
             animatingtextView.font = UIFont.preferredFont(forTextStyle: .body)
 
-            baseModelText = data.model
-            modelLabel.text = data.model
+            let byline = modelText(for: data)
+            baseModelText = byline
+            modelLabel.text = byline
             modelLabel.textColor = .secondaryLabel
             modelLabel.font = UIFont.preferredFont(forTextStyle: .caption2)
             modelLabel.numberOfLines = 1
@@ -690,6 +691,18 @@ class MessagingCell: UITableViewCell {
         return MarkdownAttributedString.render(text)
     }
 
+    /// Build the model-label base text, appending "| Context X%" when token
+    /// usage data and a known context window size are both available.
+    private func modelText(for data: MessageStruct) -> String {
+        var text = data.model
+        if let usage = data.tokenUsage,
+           let window = ModelSelection.contextWindowSize(forStamp: data.model),
+           let pct = usage.contextPercent(windowSize: window) {
+            text += " | Context \(pct)%"
+        }
+        return text
+    }
+
 
     // MARK: - Rich content (markdown tables)
 
@@ -762,8 +775,9 @@ class MessagingCell: UITableViewCell {
         ]
         NSLayoutConstraint.activate(modelLabelConstraints)
 
-        baseModelText = data.model
-        modelLabel.text = data.model
+        let byline = modelText(for: data)
+        baseModelText = byline
+        modelLabel.text = byline
         modelLabel.textColor = .secondaryLabel
         modelLabel.font = UIFont.preferredFont(forTextStyle: .caption2)
         modelLabel.numberOfLines = 1
