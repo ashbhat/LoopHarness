@@ -98,6 +98,7 @@ final class OnboardingCoordinator {
         static let modelClaude       = "model.claude"
         static let modelOpenAI       = "model.openai"
         static let modelKimi         = "model.kimi"
+        static let modelFireworks    = "model.fireworks"
         static let skipKey           = "key.skip"
         static let connectNotion     = "integration.notion"
         static let connectGitHub     = "integration.github"
@@ -163,19 +164,16 @@ final class OnboardingCoordinator {
         let resumed = StepID(rawValue: OnboardingState.lastStep) ?? .greeting
         currentStep = resumed
 
-        // First launch: explicitly pin Apple Foundation Model so the user
-        // can chat from message one without an API key, regardless of what
-        // bundled keys (e.g. KIMI_API_KEY in Secrets.xcconfig on dev builds)
-        // would otherwise cause ModelSelectionStore to default to. The
-        // model-choice step lets them opt into a hosted provider.
-        //
-        // Also seed the self-docs (SOUL/USER/MEMORY/AGENTS/HEARTBEAT) into
-        // the iCloud workspace so the user can browse + edit them in the
-        // Files app from day one. `seedSelfDocsIfMissing` skips files that
-        // already exist, so a user resuming onboarding on a second device
-        // doesn't overwrite anything they already edited.
+        // First launch: seed the self-docs and pick a sensible starting
+        // model. If the user already has a hosted-provider key (TestFlight,
+        // Secrets.xcconfig, iCloud-KVS sync), let `ModelSelectionStore`'s
+        // default logic pick that provider — pinning Apple would hide a
+        // working key and make the greeting inaccurate. Pin Apple only when
+        // no hosted key exists.
         if resumed == .greeting {
-            pinAppleFoundationModel()
+            if !ModelProvider.hasAnyProviderKey {
+                pinAppleFoundationModel()
+            }
             AgentHarness.shared.seedSelfDocsIfMissing()
         }
         post(currentStep)
@@ -223,6 +221,12 @@ final class OnboardingCoordinator {
                 pendingKeyProvider = .kimi
                 selectModel(for: .kimi)
                 advanceAfterModelPick(.kimi)
+            } else if lower.contains("fireworks") {
+                let verb = KeyStore.shared.source(for: .fireworks) != .missing ? "Use" : "Add"
+                commitAnswer(echo: "\(verb) Fireworks")
+                pendingKeyProvider = .fireworks
+                selectModel(for: .fireworks)
+                advanceAfterModelPick(.fireworks)
             } else if lower == "skip" {
                 commitAnswer(echo: "Skip")
                 pinAppleFoundationModel()
@@ -394,6 +398,13 @@ final class OnboardingCoordinator {
             pendingKeyProvider = .kimi
             selectModel(for: .kimi)
             advanceAfterModelPick(.kimi)
+
+        case (.greeting, ChipId.modelFireworks),
+             (.modelChoice, ChipId.modelFireworks):
+            commitAnswer(echo: label)
+            pendingKeyProvider = .fireworks
+            selectModel(for: .fireworks)
+            advanceAfterModelPick(.fireworks)
 
         case (.keyPaste, ChipId.skipKey):
             commitAnswer(echo: label)
@@ -578,14 +589,30 @@ final class OnboardingCoordinator {
                 ? "Use OpenAI" : "Add OpenAI"
             let kimiLabel = KeyStore.shared.source(for: .kimi) != .missing
                 ? "Use Kimi" : "Add Kimi"
+            let fireworksLabel = KeyStore.shared.source(for: .fireworks) != .missing
+                ? "Use Fireworks" : "Add Fireworks"
+            let greetingText: String
+            if ModelProvider.hasAnyProviderKey {
+                let active = ModelSelectionStore.current.displayName
+                greetingText = "Nice to meet you! **Let's get set up with this Harness.**\n\nI'm running inference with \(active). Want to try something else? Tap or type below to plug in a key."
+            } else {
+                greetingText = "Nice to meet you! **Let's get set up with this Harness.**\n\nI'm running inference with Apple's on-device model right now (free, private, but limited). Want something **more capable**? Plug in a key."
+            }
+
+            var chips: [OnboardingChoiceOption] = []
+            if ModelProvider.isAppleFoundationAvailable {
+                chips.append(.init(id: ChipId.modelApple, label: "Stay on Apple"))
+            }
+            chips.append(contentsOf: [
+                .init(id: ChipId.modelClaude,    label: claudeLabel),
+                .init(id: ChipId.modelOpenAI,    label: openAILabel),
+                .init(id: ChipId.modelKimi,      label: kimiLabel),
+                .init(id: ChipId.modelFireworks, label: fireworksLabel),
+            ])
+
             return assistantMessage(
-                text: "Nice to meet you! **Let's get set up with this Harness.**\n\nI'm running inference with Apple's on-device model right now (free, private, but limited). Want something **more capable**? Plug in a key.",
-                card: .suggestions(options: [
-                    .init(id: ChipId.modelApple,  label: "Stay on Apple"),
-                    .init(id: ChipId.modelClaude, label: claudeLabel),
-                    .init(id: ChipId.modelOpenAI, label: openAILabel),
-                    .init(id: ChipId.modelKimi,   label: kimiLabel),
-                ]))
+                text: greetingText,
+                card: .suggestions(options: chips))
 
         case .askName:
             // Final step — collected after the model + integrations + voice
@@ -773,6 +800,7 @@ final class OnboardingCoordinator {
         case .anthropic: selection = .claudeSonnet46
         case .openAI:    selection = .gpt55
         case .kimi:      selection = .kimiK26
+        case .fireworks: selection = .fireworksKimiK26
         default:         selection = nil
         }
         if let s = selection {

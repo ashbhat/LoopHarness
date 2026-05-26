@@ -595,6 +595,16 @@ The current date and time is \(now).
     /// telemetry), the other inherits it.
     private func sendTurn(userMessage: MessageStruct) {
         guard let conversation = conversation else { return }
+
+        // Cancel any in-flight TTS immediately. The user just sent a new
+        // message, so continuing to read the previous response aloud is
+        // stale and disorienting — silence it before the earcon so the
+        // "sent" chime isn't fighting the tail of the old speech.
+        if state == .speaking {
+            speechPlayer.stop()
+            state = .idle
+        }
+
         EarconPlayer.shared.play(.listenSend)
         SimpleConversationManager.shared.addMessage(userMessage, to: conversation)
         // Refresh our snapshot from the store by *this* coordinator's id,

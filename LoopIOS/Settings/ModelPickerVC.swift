@@ -40,10 +40,13 @@ final class ModelPickerVC: UIViewController {
         didSet { tableView.reloadData() }
     }
 
-    /// Providers that actually have at least one inference model. Computed
-    /// once: the catalog is static for the app's life.
-    private let inferenceProviders: [ModelProvider] = ModelProvider.allCases.filter {
-        !ModelSelection.models(for: $0).isEmpty
+    /// Providers that actually have at least one inference model, in
+    /// `ModelProvider` order. Apple is excluded when Foundation Models
+    /// aren't available on this device/OS so the user never sees an
+    /// option that would fail.
+    private lazy var inferenceProviders: [ModelProvider] = ModelProvider.allCases.filter {
+        if $0 == .apple { return ModelProvider.isAppleFoundationAvailable }
+        return !ModelSelection.models(for: $0).isEmpty
     }
 
     override func viewDidLoad() {
@@ -117,6 +120,10 @@ final class ModelPickerVC: UIViewController {
             return keyConfigured(.kimi)
                 ? "Uses your Kimi (Moonshot) API key."
                 : "Needs a Kimi API key. Add one in Settings ▸ Keys."
+        case .fireworks:
+            return keyConfigured(.fireworks)
+                ? "Uses your Fireworks API key."
+                : "Needs a Fireworks API key. Add one in Settings ▸ Keys."
         }
     }
 }

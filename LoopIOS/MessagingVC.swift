@@ -872,7 +872,8 @@ extension MessagingVC: MessageBoxDelegate {
                 }
 
 
-                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – I'm having trouble connecting to Gemini. Please try again.")
+                let modelName = ModelSelectionStore.current.displayName
+                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – \(modelName) didn't respond. You can try again or switch models in Settings ▸ Model.")
                 self.messages.append(errorMessage)
                 self.messageIdToAnimate = errorMessage.id
 
@@ -890,6 +891,10 @@ extension MessagingVC: MessageBoxDelegate {
     }
 
     func didSendMessageText(_ message: String) {
+        // Cancel any in-flight TTS immediately — the user just sent a new
+        // message, so continuing to speak the previous response is stale.
+        stopSpeaking()
+
         // Mid-onboarding text input goes to the coordinator first. If it
         // consumes the message (echoes a bubble, advances the script, or
         // re-posts the current step), short-circuit before the regular
@@ -982,7 +987,8 @@ extension MessagingVC: MessageBoxDelegate {
                 }
                 
                 
-                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – I'm having trouble connecting to Gemini. Please try again.")
+                let modelName = ModelSelectionStore.current.displayName
+                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – \(modelName) didn't respond. You can try again or switch models in Settings ▸ Model.")
                 self.messages.append(errorMessage)
                 self.messageIdToAnimate = errorMessage.id
 

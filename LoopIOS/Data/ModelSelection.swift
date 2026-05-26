@@ -13,20 +13,62 @@
 //    .openAI    → OpenAIChat   (direct, user's OPENAI_API_KEY)
 //    .anthropic → AnthropicChat (direct, user's ANTHROPIC_API_KEY)
 //    .kimi      → KimiChat      (direct, user's KIMI_API_KEY → Moonshot API)
+//    .fireworks → FireworksChat  (direct, user's FIREWORKS_API_KEY)
 //  Reachability still wins — offline always falls back to Apple, since the
 //  hosted providers can't work without a network. The selection is just the
 //  user's *preferred* model when the network is available.
 //
 
 import Foundation
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 /// Top-level provider grouping. Drives the Mac menu's submenus and the
 /// AgentHarness routing switch.
 enum ModelProvider: String, CaseIterable {
+
+    /// Whether Apple's on-device Foundation model is usable on this
+    /// device/OS. Returns `false` on pre-iOS 26, when Apple Intelligence
+    /// is disabled, or when the model hasn't finished downloading.
+    static var isAppleFoundationAvailable: Bool {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, macOS 26.0, *) {
+            if case .available = SystemLanguageModel.default.availability {
+                return true
+            }
+        }
+        #endif
+        return false
+    }
+
+    /// The highest-priority provider that already has a usable API key in
+    /// the Keychain. Returns `nil` when no hosted provider is configured.
+    static var firstKeyedProvider: ModelProvider? {
+        let ranked: [(ModelProvider, KeyStore.Key)] = [
+            (.anthropic, .anthropic),
+            (.openAI, .openAI),
+            (.kimi, .kimi),
+            (.fireworks, .fireworks),
+        ]
+        for (provider, key) in ranked {
+            if KeyStore.shared.source(for: key) != .missing {
+                return provider
+            }
+        }
+        return nil
+    }
+
+    /// `true` when at least one hosted-provider API key is configured.
+    static var hasAnyProviderKey: Bool {
+        firstKeyedProvider != nil
+    }
+
     case apple
     case openAI
     case anthropic
     case kimi
+    case fireworks
 
     var displayName: String {
         switch self {
@@ -34,6 +76,7 @@ enum ModelProvider: String, CaseIterable {
         case .openAI:    return "OpenAI"
         case .anthropic: return "Anthropic"
         case .kimi:      return "Kimi"
+        case .fireworks: return "Fireworks"
         }
     }
 }
@@ -58,6 +101,9 @@ enum ModelSelection: String, CaseIterable {
     // Moonshot / Kimi.
     case kimiK26 = "kimiK26"
 
+    // Fireworks.
+    case fireworksKimiK26 = "fireworksKimiK26"
+
     var provider: ModelProvider {
         switch self {
         case .appleFoundation:
@@ -68,6 +114,8 @@ enum ModelSelection: String, CaseIterable {
             return .anthropic
         case .kimiK26:
             return .kimi
+        case .fireworksKimiK26:
+            return .fireworks
         }
     }
 
@@ -83,6 +131,7 @@ enum ModelSelection: String, CaseIterable {
         case .claudeSonnet46:  return "Claude Sonnet 4.6"
         case .claudeHaiku45:   return "Claude Haiku 4.5"
         case .kimiK26:         return "Kimi K2.6"
+        case .fireworksKimiK26: return "Kimi K2.6"
         }
     }
 
@@ -101,6 +150,7 @@ enum ModelSelection: String, CaseIterable {
         case .claudeSonnet46:  return "claude-sonnet-4-6"
         case .claudeHaiku45:   return "claude-haiku-4-5-20251001"
         case .kimiK26:         return "kimi-k2.6"
+        case .fireworksKimiK26: return "accounts/fireworks/models/kimi-k2p6"
         }
     }
 
@@ -129,6 +179,7 @@ enum ModelSelection: String, CaseIterable {
         case .openAI:    return .openAI
         case .anthropic: return .anthropic
         case .kimi:      return .kimi
+        case .fireworks: return .fireworks
         }
     }
 }

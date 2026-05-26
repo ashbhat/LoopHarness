@@ -175,7 +175,7 @@ final class ConversationTitleService {
         // their cloud key was cleared). Try the cheap-cloud fallbacks in
         // order, then on-device. This way someone on Apple still gets a
         // title via Haiku if they happen to have an Anthropic key paste'd.
-        for fallback in [ModelProvider.anthropic, .openAI, .kimi, .apple] {
+        for fallback in [ModelProvider.anthropic, .openAI, .kimi, .fireworks, .apple] {
             if fallback == preferred { continue }
             if let p = provider(for: fallback) { return p }
         }
@@ -203,6 +203,11 @@ final class ConversationTitleService {
         case .kimi:
             if let key = KeyStore.shared.value(for: .kimi), !key.isEmpty {
                 return .kimi(key: key)
+            }
+            return nil
+        case .fireworks:
+            if let key = KeyStore.shared.value(for: .fireworks), !key.isEmpty {
+                return .fireworks(key: key)
             }
             return nil
         }
@@ -307,6 +312,7 @@ private enum TitleProvider {
     case anthropic(key: String)
     case openAI(key: String)
     case kimi(key: String)
+    case fireworks(key: String)
     /// On-device via FoundationModels. No key, no network — slower than the
     /// cheap-cloud models but always works if Apple Intelligence is enabled.
     case apple
@@ -321,6 +327,8 @@ private enum TitleProvider {
             Self.sendOpenAI(key: key, snippet: snippet, session: session, completion: completion)
         case .kimi(let key):
             Self.sendKimi(key: key, snippet: snippet, session: session, completion: completion)
+        case .fireworks(let key):
+            Self.sendFireworks(key: key, snippet: snippet, session: session, completion: completion)
         case .apple:
             Self.sendApple(snippet: snippet, completion: completion)
         }
@@ -460,6 +468,51 @@ Title this conversation in 3-5 words:
             if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
                 let bodyStr = data.flatMap { String(data: $0, encoding: .utf8) } ?? "<no body>"
                 print("TitleService kimi HTTP \(http.statusCode): \(bodyStr)")
+                completion(nil); return
+            }
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let message = choices.first?["message"] as? [String: Any],
+                  let text = message["content"] as? String else {
+                completion(nil); return
+            }
+            completion(text)
+        }
+        task.resume()
+    }
+
+    // MARK: Fireworks (Kimi K2.6 via Fireworks inference)
+
+    private static func sendFireworks(key: String,
+                                      snippet: String,
+                                      session: URLSession,
+                                      completion: @escaping (String?) -> Void) {
+        guard let url = URL(string: "https://api.fireworks.ai/inference/v1/chat/completions") else {
+            completion(nil); return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "model": "accounts/fireworks/models/kimi-k2p6",
+            "max_tokens": 32,
+            "temperature": 0.4,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": userInstruction + snippet],
+            ],
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        let task = session.dataTask(with: req) { data, response, error in
+            if let error = error {
+                print("TitleService fireworks error: \(error.localizedDescription)")
+                completion(nil); return
+            }
+            if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+                let bodyStr = data.flatMap { String(data: $0, encoding: .utf8) } ?? "<no body>"
+                print("TitleService fireworks HTTP \(http.statusCode): \(bodyStr)")
                 completion(nil); return
             }
             guard let data = data,

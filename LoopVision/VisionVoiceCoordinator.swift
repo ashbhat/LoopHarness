@@ -358,6 +358,16 @@ final class VisionVoiceCoordinator {
 
     private func sendUserText(_ text: String) {
         guard let conversation else { return }
+
+        // Cancel any in-flight TTS — the user just sent a new message, so
+        // the previous response should stop playing immediately.
+        if state == .speaking {
+            speechToken = nil
+            deepgramTTS?.stop(); deepgramTTS = nil
+            if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
+            state = .idle
+        }
+
         let userMessage = MessageStruct(role: "user", content: text)
         SimpleConversationManager.shared.addMessage(userMessage, to: conversation)
         if let refreshed = SimpleConversationManager.shared.currentConversation {
