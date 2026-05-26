@@ -272,12 +272,18 @@ The current date and time is \(now).
         // Stop any in-progress speech playback.
         speechPlayer.stop()
 
-        // Pick STT path: Deepgram online (lower latency, better partials),
-        // Apple SFSpeechRecognizer when offline OR the Deepgram key is
-        // missing. The latter mirrors iOS's MessageBox fallthrough — if a
-        // user hasn't entered a Deepgram key yet, they still get voice via
-        // the on-device path.
-        let useApple = !Reachability.isOnline || Self.deepgramAPIKey == nil
+        // Pick STT path. `STTProviderStore.current` is `.auto` by default and
+        // reproduces the historical heuristic — Deepgram online (lower
+        // latency, better partials) and Apple SFSpeechRecognizer when offline
+        // or the Deepgram key is missing. The user can pin either engine in
+        // Settings ▸ Model ▸ STT on iOS; the same store syncs over iCloud-KVS
+        // so the Mac respects the override here.
+        let useApple: Bool
+        switch STTProviderStore.current {
+        case .apple:    useApple = true
+        case .deepgram: useApple = (Self.deepgramAPIKey == nil)
+        case .auto:     useApple = !Reachability.isOnline || Self.deepgramAPIKey == nil
+        }
 
         // Mac mic permission. We use AVCaptureDevice (not
         // AVAudioApplication.recordPermission) because the latter has a

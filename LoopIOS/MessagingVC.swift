@@ -64,71 +64,9 @@ enum SpeechSpeed: String, CaseIterable {
     }
 }
 
-/// Streaming-TTS provider used for assistant audio. Change `active` and
-/// rebuild to swap providers; each case has its own API-key Info.plist slot
-/// and falls through to AVSpeechSynthesizer if the key is missing or the
-/// request fails.
-enum TTSProvider: String, CaseIterable {
-    case aura2              = "aura2"              // Deepgram Aura-2 — fastest, flat prosody
-    case elevenLabsV3       = "elevenLabsV3"       // ElevenLabs Eleven v3 — most expressive, ~600ms-1s TTFB
-    case elevenLabsFlashV25 = "elevenLabsFlashV25" // ElevenLabs Flash v2.5 — low-latency (~75ms model TTFB), less expressive than v3
-    case openAIMiniTTS      = "openAIMiniTTS"      // OpenAI gpt-4o-mini-tts — steerable via instructions
-    case system             = "system"             // On-device AVSpeechSynthesizer (no network)
-
-    /// Human-readable name shown in the speaker menu.
-    var displayName: String {
-        switch self {
-        case .aura2:              return "Deepgram Aura-2"
-        case .elevenLabsV3:       return "ElevenLabs v3"
-        case .elevenLabsFlashV25: return "ElevenLabs Flash v2.5"
-        case .openAIMiniTTS:      return "OpenAI gpt-4o-mini-tts"
-        case .system:             return "On-device (offline)"
-        }
-    }
-
-    /// Voice identifiers the user can pick for this provider, alongside a
-    /// human label. For the `.system` case, voices come from
-    /// AVSpeechSynthesisVoice.speechVoices() at runtime — handled separately.
-    var voiceOptions: [(label: String, id: String)] {
-        switch self {
-        case .aura2:
-            return [
-                ("Thalia (warm female)",   "aura-2-thalia-en"),
-                ("Asteria (calm female)",  "aura-2-asteria-en"),
-                ("Luna (soft female)",     "aura-2-luna-en"),
-                ("Helios (deep male)",     "aura-2-helios-en"),
-                ("Orion (clear male)",     "aura-2-orion-en"),
-                ("Arcas (narrative male)", "aura-2-arcas-en")
-            ]
-        case .elevenLabsV3, .elevenLabsFlashV25:
-            return [
-                ("Rachel (warm female)",  "21m00Tcm4TlvDq8ikWAM"),
-                ("Bella (young female)",  "EXAVITQu4vr4xnSDxMaL"),
-                ("Adam (deep male)",      "pNInz6obpgDQGcFmaJgB"),
-                ("Antoni (calm male)",    "ErXwobaYiN019PkySvjV"),
-                ("Elli (soft female)",    "MF3mGyEYCl7XYWbV9V6O"),
-                ("Josh (steady male)",    "TxGEqnHWrfWFTfGW9XjX")
-            ]
-        case .openAIMiniTTS:
-            return ["alloy", "echo", "fable", "onyx", "nova",
-                    "shimmer", "coral", "sage", "ash", "ballad", "verse"]
-                .map { ($0.capitalized, $0) }
-        case .system:
-            return []
-        }
-    }
-
-    /// Voice id used when the user hasn't picked one for this provider yet.
-    var defaultVoiceId: String {
-        switch self {
-        case .aura2:              return "aura-2-thalia-en"
-        case .elevenLabsV3:       return "21m00Tcm4TlvDq8ikWAM"
-        case .elevenLabsFlashV25: return "21m00Tcm4TlvDq8ikWAM"
-        case .openAIMiniTTS:      return "shimmer"
-        case .system:             return ""
-        }
-    }
-}
+// TTSProvider has moved to LoopIOS/Data/SpeechProvider.swift so the macOS
+// and visionOS targets (which exclude MessagingVC.swift) can read the same
+// enum from STT/TTS settings code that's shared across all targets.
 
 class MessagingVC: UIViewController {
 
@@ -247,16 +185,14 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
         }
     }
 
-    /// User-selected TTS provider. Persisted across launches; defaults to
-    /// OpenAI gpt-4o-mini-tts. The setter rebuilds the speaker menu so the
-    /// voice submenu updates to the new provider's voice list.
+    /// User-selected TTS provider. Persisted across launches via
+    /// `TTSProviderStore` so the speaker menu and Settings ▸ Model write
+    /// the same iCloud-KVS key. The setter rebuilds the speaker menu so
+    /// the voice submenu updates to the new provider's voice list.
     private var ttsProvider: TTSProvider {
-        get {
-            let raw = iCloudKVSDefaults.shared.string(forKey: "ttsProvider") ?? TTSProvider.openAIMiniTTS.rawValue
-            return TTSProvider(rawValue: raw) ?? .openAIMiniTTS
-        }
+        get { TTSProviderStore.current }
         set {
-            iCloudKVSDefaults.shared.set(newValue.rawValue, forKey: "ttsProvider")
+            TTSProviderStore.current = newValue
             muteButton?.menu = buildSpeakerMenu()
         }
     }
@@ -460,6 +396,16 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
             self,
             selector: #selector(handleSubAgentMessage(_:)),
             name: .devinAgentDidPostMessage,
+            object: nil
+        )
+
+        // Settings ▸ Model writes to TTSProviderStore from outside our setter.
+        // Rebuild the speaker menu so the checkmark + voice submenu reflect
+        // the new pick without waiting for the user to reopen this VC.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTTSProviderChanged),
+            name: .ttsProviderChanged,
             object: nil
         )
 
@@ -681,6 +627,16 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
         // Add a small delay to ensure the view is fully loaded
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             self.toggleVoiceTranscription()
+        }
+    }
+
+    /// Posted by TTSProviderStore when Settings ▸ Model picks a new provider.
+    /// We rebuild the speaker menu directly rather than rerouting through the
+    /// `ttsProvider` setter (which would also re-post the same notification
+    /// and create a feedback loop).
+    @objc private func handleTTSProviderChanged() {
+        DispatchQueue.main.async { [weak self] in
+            self?.muteButton?.menu = self?.buildSpeakerMenu()
         }
     }
 

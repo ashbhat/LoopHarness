@@ -647,10 +647,30 @@ class MessageBox: UIView {
             return
         }
 
-        // Try the streaming Deepgram path first when a key is configured AND we're
-        // online. beginStreamingRecording() returns false on any setup failure, in
-        // which case we fall through to the AVAudioRecorder + SFSpeech flow below.
-        if MessageBox.deepgramAPIKey != nil, MessageBox.isOnline, beginStreamingRecording() {
+        // STT engine selection. The user can pin either provider in
+        // Settings ▸ Model ▸ STT; `auto` reproduces the historical
+        // "prefer Deepgram when online with a key" heuristic.
+        //
+        //   .deepgram → try Deepgram-streaming; on setup failure fall
+        //               through to the AVAudioRecorder + SFSpeech path
+        //               so the recording still succeeds.
+        //   .apple    → skip Deepgram entirely; record to a file via
+        //               AVAudioRecorder and run SFSpeech against it on
+        //               finalize. No network, no API key.
+        //   .auto     → Deepgram when its key is configured and the device
+        //               is online; otherwise the AVAudioRecorder + SFSpeech
+        //               fallback, same as before.
+        let sttPick = STTProviderStore.current
+        let shouldTryDeepgram: Bool
+        switch sttPick {
+        case .deepgram:
+            shouldTryDeepgram = (MessageBox.deepgramAPIKey != nil)
+        case .apple:
+            shouldTryDeepgram = false
+        case .auto:
+            shouldTryDeepgram = (MessageBox.deepgramAPIKey != nil && MessageBox.isOnline)
+        }
+        if shouldTryDeepgram, beginStreamingRecording() {
             return
         }
 
