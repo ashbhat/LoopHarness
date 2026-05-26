@@ -330,11 +330,15 @@ class SimpleConversationManager {
     }
 
     func conversationStruct(from simpleConversation: SimpleConversation) -> Conversation {
+        let id = simpleConversation.id
+        let hasAgents = SubAgentManager.shared.aggregateLiveCount(for: id) > 0
+        let hasActiveRequest = ActiveRequestTracker.shared.isActive(for: id)
         return Conversation(
-            id: simpleConversation.id,
+            id: id,
             title: simpleConversation.title,
             lastMessage: simpleConversation.messages.last?.content ?? "",
-            timestamp: simpleConversation.updatedAt
+            timestamp: simpleConversation.updatedAt,
+            isRunning: hasAgents || hasActiveRequest
         )
     }
 }

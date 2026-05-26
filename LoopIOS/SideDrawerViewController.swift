@@ -156,9 +156,14 @@ class SideDrawerViewController: UIViewController {
         setupGestures()
         setupConstraints()
         loadConversations()
+        observeChanges()
         
         // Don't automatically open drawer - let the parent decide when to open
         // This prevents flashing when used for edge pan tracking
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
     
     // MARK: - Setup Methods
@@ -319,9 +324,27 @@ class SideDrawerViewController: UIViewController {
     }
     
     // MARK: - Data Methods
-    
+
+    /// Observe store + agent changes so the conversation list live-updates
+    /// while the drawer is open (running indicators, message previews).
+    private func observeChanges() {
+        let nc = NotificationCenter.default
+        nc.addObserver(self, selector: #selector(handleConversationsChanged),
+                       name: .conversationStoreDidChange, object: nil)
+        nc.addObserver(self, selector: #selector(handleConversationsChanged),
+                       name: .subAgentsDidChange, object: nil)
+        nc.addObserver(self, selector: #selector(handleConversationsChanged),
+                       name: .devinAgentsDidChange, object: nil)
+        nc.addObserver(self, selector: #selector(handleConversationsChanged),
+                       name: .cursorAgentsDidChange, object: nil)
+    }
+
+    @objc private func handleConversationsChanged() {
+        guard mode == .conversations else { return }
+        loadConversations()
+    }
+
     private func loadConversations() {
-        // Load conversations from Core Data
         let conversationEntities = conversationManager.getAllConversations()
         conversations = conversationEntities.map { conversationManager.conversationStruct(from: $0) }
         
@@ -966,6 +989,10 @@ class ConversationCell: UITableViewCell {
     private let lastMessageLabel = UILabel()
     private let timestampLabel = UILabel()
     private let separatorView = UIView()
+
+    /// Small colored dot indicating an active agent run for this conversation.
+    private let runningDot = UIView()
+    private let pulseLayer = CALayer()
     
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -980,6 +1007,16 @@ class ConversationCell: UITableViewCell {
         backgroundColor = .clear
         selectionStyle = .none
         
+        // Running-indicator dot (hidden by default)
+        runningDot.translatesAutoresizingMaskIntoConstraints = false
+        runningDot.backgroundColor = .systemGreen
+        runningDot.layer.cornerRadius = 4
+        runningDot.isHidden = true
+        pulseLayer.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.4).cgColor
+        pulseLayer.cornerRadius = 4
+        runningDot.layer.insertSublayer(pulseLayer, at: 0)
+        contentView.addSubview(runningDot)
+
         // Setup title label
         titleLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
         titleLabel.textColor = .label
@@ -1008,6 +1045,11 @@ class ConversationCell: UITableViewCell {
         
         // Setup constraints
         NSLayoutConstraint.activate([
+            runningDot.widthAnchor.constraint(equalToConstant: 8),
+            runningDot.heightAnchor.constraint(equalToConstant: 8),
+            runningDot.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
+            runningDot.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+
             titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
             titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             titleLabel.trailingAnchor.constraint(equalTo: timestampLabel.leadingAnchor, constant: -8),
@@ -1027,6 +1069,11 @@ class ConversationCell: UITableViewCell {
             separatorView.heightAnchor.constraint(equalToConstant: 0.5)
         ])
     }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        pulseLayer.frame = runningDot.bounds
+    }
     
     func configure(with conversation: Conversation, isCurrent: Bool = false) {
         titleLabel.text = conversation.title
@@ -1036,6 +1083,14 @@ class ConversationCell: UITableViewCell {
         formatter.dateStyle = .short
         formatter.timeStyle = .short
         timestampLabel.text = formatter.string(from: conversation.timestamp)
+
+        // Running-indicator dot
+        runningDot.isHidden = !conversation.isRunning
+        if conversation.isRunning {
+            startPulse()
+        } else {
+            stopPulse()
+        }
         
         // Highlight current conversation. Bumped from 0.1 → 0.22 so the
         // tint reads against the drawer's `secondarySystemBackground` —
@@ -1050,5 +1105,43 @@ class ConversationCell: UITableViewCell {
             titleLabel.textColor = .label
             titleLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
         }
+    }
+
+    // MARK: - Pulse animation
+
+    private func startPulse() {
+        guard pulseLayer.animation(forKey: "pulse") == nil else { return }
+        let anim = CABasicAnimation(keyPath: "transform.scale")
+        anim.fromValue = 1.0
+        anim.toValue = 1.8
+        anim.duration = 1.0
+        anim.autoreverses = true
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+
+        let opacity = CABasicAnimation(keyPath: "opacity")
+        opacity.fromValue = 0.6
+        opacity.toValue = 0.0
+        opacity.duration = 1.0
+        opacity.autoreverses = true
+        opacity.repeatCount = .infinity
+        opacity.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+
+        let group = CAAnimationGroup()
+        group.animations = [anim, opacity]
+        group.duration = 1.0
+        group.autoreverses = true
+        group.repeatCount = .infinity
+        pulseLayer.add(group, forKey: "pulse")
+    }
+
+    private func stopPulse() {
+        pulseLayer.removeAnimation(forKey: "pulse")
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        runningDot.isHidden = true
+        stopPulse()
     }
 }
