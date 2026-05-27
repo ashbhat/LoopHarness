@@ -110,6 +110,8 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
 \(SchedulerSkill.systemPromptFragment)
 
 \(ExaSkill.systemPromptFragment)
+
+\(MuniRealtimeSkill.systemPromptFragment)
 """
     
     var default_message: String = "Hello!"
@@ -1107,6 +1109,7 @@ extension MessagingVC: MessageBoxDelegate {
         if let s = NavigationSkill.shared.statusText(for: call) { return s }
         if let s = TwitterSkill.shared.statusText(for: call) { return s }
         if let s = SSHSkill.shared.statusText(for: call) { return s }
+        if let s = MuniRealtimeSkill.shared.statusText(for: call) { return s }
         #if canImport(HealthKit) && os(iOS)
         if let s = HealthSkill.shared.statusText(for: call) { return s }
         #endif

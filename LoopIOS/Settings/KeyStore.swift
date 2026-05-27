@@ -43,6 +43,7 @@ final class KeyStore {
         case xAPISecret             = "X_API_SECRET"
         case xAccessToken           = "X_ACCESS_TOKEN"
         case xAccessTokenSecret     = "X_ACCESS_TOKEN_SECRET"
+        case sfBayTransit           = "SF_BAY_511_API_KEY"
 
         /// User-facing label shown in Settings.
         var displayName: String {
@@ -67,6 +68,7 @@ final class KeyStore {
             case .xAPISecret:             return "X API Secret"
             case .xAccessToken:           return "X Access Token"
             case .xAccessTokenSecret:     return "X Access Token Secret"
+            case .sfBayTransit:           return "511 SF Bay API Key"
             }
         }
 
@@ -93,6 +95,7 @@ final class KeyStore {
             case .xAPISecret:             return "OAuth 1.0a consumer secret — shown once when you regenerate the API key"
             case .xAccessToken:           return "User-level access token with read+write permission from developer.x.com"
             case .xAccessTokenSecret:     return "User-level access token secret — shown once at generation time"
+            case .sfBayTransit:           return "Free API token from 511.org/open-data/token — powers real-time Muni arrival predictions"
             }
         }
     }
@@ -107,6 +110,7 @@ final class KeyStore {
         case cursor, devin
         case github, slack, notion, obsidian
         case twitter
+        case sfBayTransit
 
         /// Row title in the list + window title in the editor.
         var displayName: String {
@@ -124,6 +128,7 @@ final class KeyStore {
             case .notion:     return "Notion"
             case .obsidian:   return "Obsidian"
             case .twitter:    return "X (Twitter)"
+            case .sfBayTransit: return "511 SF Bay"
             }
         }
 
@@ -146,6 +151,7 @@ final class KeyStore {
             case .notion:     return "Read and write Notion pages and databases"
             case .obsidian:   return "Read and write your Obsidian vault through a self-hosted relay"
             case .twitter:    return "Post tweets to X (Twitter) with OAuth 1.0a"
+            case .sfBayTransit: return "Real-time SF Muni bus/train arrival predictions via the 511 API"
             }
         }
 
@@ -169,6 +175,7 @@ final class KeyStore {
             case .notion:     return [.notionIntegrationToken]
             case .obsidian:   return [.obsidianAPI, .obsidianBaseURL, .obsidianVaultName]
             case .twitter:    return [.xAPIKey, .xAPISecret, .xAccessToken, .xAccessTokenSecret]
+            case .sfBayTransit: return [.sfBayTransit]
             }
         }
 
