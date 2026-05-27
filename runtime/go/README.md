@@ -61,8 +61,65 @@ sudo systemctl enable --now loop-runner
 | `POST` | `/result` | Yes | Device → VM result delivery. Body: `{job_id, result?, error?}`. |
 | `GET` | `/turn/:id` | Yes | Fetch a past turn from storage. |
 | `GET` | `/job/:job_id` | Yes | Fetch a job's status + result. |
+| `GET` | `/turns` | Yes | Poll turns. Query params: `since`, `status`, `limit`. |
+| `GET` | `/jobs` | Yes | Poll jobs. Query params: `since`, `status`, `limit`. |
 
 **Auth:** All protected endpoints require `Authorization: Bearer <shared_secret>` header.
+
+## Polling
+
+The `GET /turns` and `GET /jobs` endpoints let iOS clients pull completed turns and jobs without needing APNs push. The pattern:
+
+1. First request — call `GET /turns` with no `since` param to get the most recent turns.
+2. Store `server_time` from the response.
+3. Next request — pass the stored value as `?since=<server_time>` to get only turns updated since the last poll.
+4. Repeat.
+
+### Query parameters
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `since` | RFC 3339 timestamp | *(none)* | Only return items with `updated_at` after this time. |
+| `status` | string | *(none)* | Filter by status (`running`, `completed`, `error` for turns; `pending`, `completed`, `error`, `timed_out` for jobs). |
+| `limit` | int | 20 | Max items to return (capped at 100). |
+
+### Response shape
+
+```jsonc
+// GET /turns?since=2025-01-01T00:00:00Z&status=completed&limit=10
+{
+  "turns": [
+    {
+      "id": "turn_abc",
+      "created_at": "2025-01-01T00:00:01Z",
+      "updated_at": "2025-01-01T00:00:02Z",
+      "status": "completed",
+      "final_response": "Hello!",
+      "error": ""
+    }
+  ],
+  "server_time": "2025-01-01T00:00:05.123456789Z"
+}
+```
+
+`GET /jobs` returns the same envelope shape with a `"jobs"` array instead of `"turns"`.
+
+### Example polling loop (Swift)
+
+```swift
+var cursor: String? = nil
+
+func poll() async throws {
+    var url = baseURL.appendingPathComponent("turns")
+    if let since = cursor {
+        url.append(queryItems: [URLQueryItem(name: "since", value: since)])
+    }
+    let (data, _) = try await session.data(from: url)
+    let response = try JSONDecoder().decode(PollResponse.self, from: data)
+    cursor = response.serverTime  // store for next poll
+    process(response.turns)
+}
+```
 
 ## Architecture
 
@@ -86,6 +143,7 @@ Tests cover:
 - Registry routing (Local vs Device tag dispatch)
 - Bridge timeout and result fan-in (with fake APNs client)
 - Integration: mock LLM → echo tool call → round-trip → persisted turn
+- Polling: `since` filter, `status` filter, `limit` cap, `server_time` monotonicity, auth rejection
 
 ## What's in v0
 

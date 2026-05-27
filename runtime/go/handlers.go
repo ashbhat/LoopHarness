@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/theashbhat/LoopHarness/runtime/go/agent"
 	"github.com/theashbhat/LoopHarness/runtime/go/bridge"
@@ -113,5 +115,108 @@ func handleGetJob(store *storage.Store) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(job)
+	}
+}
+
+func parsePollParams(r *http.Request) (since *time.Time, status string, limit int) {
+	limit = 20
+	if s := r.URL.Query().Get("since"); s != "" {
+		if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+			since = &t
+		} else if t, err := time.Parse(time.RFC3339, s); err == nil {
+			since = &t
+		}
+	}
+	status = r.URL.Query().Get("status")
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return
+}
+
+type turnPollItem struct {
+	ID            string    `json:"id"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Status        string    `json:"status"`
+	FinalResponse string    `json:"final_response"`
+	Error         string    `json:"error,omitempty"`
+}
+
+type jobPollItem struct {
+	JobID       string          `json:"job_id"`
+	TurnID      string          `json:"turn_id"`
+	Tool        string          `json:"tool"`
+	ArgsJSON    json.RawMessage `json:"args_json"`
+	Status      string          `json:"status"`
+	ResultJSON  json.RawMessage `json:"result_json,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+	CompletedAt *time.Time      `json:"completed_at,omitempty"`
+}
+
+// GET /turns
+func handleListTurns(store *storage.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		since, status, limit := parsePollParams(r)
+		turns, err := store.ListTurns(since, status, limit)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+		items := make([]turnPollItem, len(turns))
+		for i, t := range turns {
+			items[i] = turnPollItem{
+				ID:            t.ID,
+				CreatedAt:     t.CreatedAt,
+				UpdatedAt:     t.UpdatedAt,
+				Status:        t.Status,
+				FinalResponse: t.FinalResponse,
+				Error:         t.Error,
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"turns":       items,
+			"server_time": time.Now().UTC().Format(time.RFC3339Nano),
+		})
+	}
+}
+
+// GET /jobs
+func handleListJobs(store *storage.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		since, status, limit := parsePollParams(r)
+		jobs, err := store.ListJobs(since, status, limit)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+		items := make([]jobPollItem, len(jobs))
+		for i, j := range jobs {
+			items[i] = jobPollItem{
+				JobID:       j.JobID,
+				TurnID:      j.TurnID,
+				Tool:        j.Tool,
+				ArgsJSON:    j.ArgsJSON,
+				Status:      j.Status,
+				ResultJSON:  j.ResultJSON,
+				Error:       j.Error,
+				CreatedAt:   j.CreatedAt,
+				UpdatedAt:   j.UpdatedAt,
+				CompletedAt: j.CompletedAt,
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"jobs":        items,
+			"server_time": time.Now().UTC().Format(time.RFC3339Nano),
+		})
 	}
 }

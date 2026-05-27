@@ -72,6 +72,8 @@ func main() {
 	mux.HandleFunc("POST /result", authMiddleware(cfg.SharedSecret, handleResult(brg)))
 	mux.HandleFunc("GET /turn/{id}", authMiddleware(cfg.SharedSecret, handleGetTurn(store)))
 	mux.HandleFunc("GET /job/{job_id}", authMiddleware(cfg.SharedSecret, handleGetJob(store)))
+	mux.HandleFunc("GET /turns", authMiddleware(cfg.SharedSecret, handleListTurns(store)))
+	mux.HandleFunc("GET /jobs", authMiddleware(cfg.SharedSecret, handleListJobs(store)))
 
 	addr := fmt.Sprintf(":%d", cfg.ListenPort)
 	srv := &http.Server{Addr: addr, Handler: mux}
