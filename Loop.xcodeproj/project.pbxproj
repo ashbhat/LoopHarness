@@ -11,6 +11,9 @@
 		DA17C12F00000000000000F2 /* SwiftGitX in Frameworks */ = {isa = PBXBuildFile; productRef = DA17C12F00000000000000F4 /* SwiftGitX */; };
 		DA17C12F00000000000000F3 /* SwiftGitX in Frameworks */ = {isa = PBXBuildFile; productRef = DA17C12F00000000000000F5 /* SwiftGitX */; };
 		DA17C12F00000000000000F6 /* SwiftGitX in Frameworks */ = {isa = PBXBuildFile; productRef = DA17C12F00000000000000F7 /* SwiftGitX */; };
+		DA17C13000000000000000B4 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = DA17C13000000000000000A4 /* NIOSSH */; };
+		DA17C13000000000000000B5 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = DA17C13000000000000000A5 /* NIOSSH */; };
+		DA17C13000000000000000B6 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = DA17C13000000000000000A6 /* NIOSSH */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -90,6 +93,7 @@
 				Settings/KeyEditVC.swift,
 				Settings/KeysVC.swift,
 				Settings/ModelPickerVC.swift,
+				Settings/SSHSettingsVC.swift,
 				Settings/SettingsVC.swift,
 				Settings/SkillsVC.swift,
 				SideDrawerViewController.swift,
@@ -128,6 +132,7 @@
 				Settings/KeyEditVC.swift,
 				Settings/KeysVC.swift,
 				Settings/ModelPickerVC.swift,
+				Settings/SSHSettingsVC.swift,
 				Settings/SettingsVC.swift,
 				Settings/SkillsVC.swift,
 				SideDrawerViewController.swift,
@@ -187,6 +192,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DA17C12F00000000000000F2 /* SwiftGitX in Frameworks */,
+				DA17C13000000000000000B4 /* NIOSSH in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -195,6 +201,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DA17C12F00000000000000F3 /* SwiftGitX in Frameworks */,
+				DA17C13000000000000000B5 /* NIOSSH in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -203,6 +210,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DA17C12F00000000000000F6 /* SwiftGitX in Frameworks */,
+				DA17C13000000000000000B6 /* NIOSSH in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -277,6 +285,7 @@
 			name = Loop;
 			packageProductDependencies = (
 				DA17C12F00000000000000F4 /* SwiftGitX */,
+				DA17C13000000000000000A4 /* NIOSSH */,
 			);
 			productName = Loop;
 			productReference = 6A0903832CD69D9500E70D46 /* Loop.app */;
@@ -301,6 +310,7 @@
 			name = LoopMac;
 			packageProductDependencies = (
 				DA17C12F00000000000000F5 /* SwiftGitX */,
+				DA17C13000000000000000A5 /* NIOSSH */,
 			);
 			productName = LoopMac;
 			productReference = 6B00010100000000DEADBEEF /* LoopMac.app */;
@@ -325,6 +335,7 @@
 			name = LoopVision;
 			packageProductDependencies = (
 				DA17C12F00000000000000F7 /* SwiftGitX */,
+				DA17C13000000000000000A6 /* NIOSSH */,
 			);
 			productName = LoopVision;
 			productReference = 6C00020100000000DEADBEEF /* LoopVision.app */;
@@ -365,6 +376,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				DA17C12F00000000000000F1 /* XCRemoteSwiftPackageReference "SwiftGitX" */,
+				DA17C13000000000000000A1 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6A0903842CD69D9500E70D46 /* Products */;
@@ -942,6 +954,14 @@
 				version = 0.4.0;
 			};
 		};
+		DA17C13000000000000000A1 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-nio-ssh.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -959,6 +979,21 @@
 			isa = XCSwiftPackageProductDependency;
 			package = DA17C12F00000000000000F1 /* XCRemoteSwiftPackageReference "SwiftGitX" */;
 			productName = SwiftGitX;
+		};
+		DA17C13000000000000000A4 /* NIOSSH */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DA17C13000000000000000A1 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */;
+			productName = NIOSSH;
+		};
+		DA17C13000000000000000A5 /* NIOSSH */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DA17C13000000000000000A1 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */;
+			productName = NIOSSH;
+		};
+		DA17C13000000000000000A6 /* NIOSSH */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DA17C13000000000000000A1 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */;
+			productName = NIOSSH;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
