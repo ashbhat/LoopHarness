@@ -1,0 +1,20 @@
+[Unit]
+Description=Loop Runner - Portable Agent Runtime
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/loop-runner/loop-runner -config /opt/loop-runner/config.json
+WorkingDirectory=/opt/loop-runner
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/loop-runner
+
+[Install]
+WantedBy=multi-user.target
