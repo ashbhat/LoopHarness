@@ -45,6 +45,9 @@ final class SettingsVC: UIViewController {
             },
             Row(title: "Keys", icon: "key.fill") { settings in
                 settings.navigationController?.pushViewController(KeysVC(), animated: true)
+            },
+            Row(title: "Runners", icon: "server.rack") { settings in
+                settings.navigationController?.pushViewController(RunnersListVC(), animated: true)
             }
         ]),
         // Lives in its own section so it reads as a discrete debug/utility

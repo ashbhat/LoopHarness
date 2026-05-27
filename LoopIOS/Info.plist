@@ -122,6 +122,7 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.bhat.intel.scheduler.prefetch</string>
+		<string>com.loop.runner.poll</string>
 	</array>
 </dict>
 </plist>
