@@ -298,8 +298,15 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
     /// any onboarding-flow turns — those are scripted UI, not part of the
     /// real conversation, and should not leak into the model's context on the
     /// first real message the user sends.
+    ///
+    /// When a compaction summary file exists for the current conversation,
+    /// the returned array is the compacted form: system messages + summary +
+    /// last N messages. The UI (`visible_messages`) continues to show the
+    /// full history.
     var chatContextMessages: [MessageStruct] {
-        return self.messages.filter { $0.onboardingCard == nil }
+        let filtered = self.messages.filter { $0.onboardingCard == nil }
+        guard let convId = currentConversationEntity?.id else { return filtered }
+        return ContextCompactor.compactedMessages(all: filtered, conversationId: convId)
     }
     
     override func viewDidLoad() {
@@ -1007,9 +1014,23 @@ extension MessagingVC: MessageBoxDelegate {
         self.activeRequestConversationId = requestConversationId
         ActiveRequestTracker.shared.markActive(requestConversationId)
 
+        // Opportunistic context compaction: check thresholds and spawn a
+        // background sub-agent if the context is large enough. The trigger
+        // level is captured so we can append a brief notice to the
+        // assistant's reply when the hard threshold is crossed.
+        let compactionTrigger = ContextCompactor.checkAndTrigger(
+            messages: self.chatContextMessages,
+            conversationId: requestConversationId
+        )
+
         Cloud.connection.chat(messages: self.chatContextMessages) { responseMessage, error in
             self.ai_state = .None
-            if let responseMessage = responseMessage {
+            if var responseMessage = responseMessage {
+                // Hard-trigger notice: append a one-liner so the user knows
+                // compaction is running in the background.
+                if compactionTrigger == .hard {
+                    responseMessage.content += "\n\n(compacting context in the background)"
+                }
                 self.processMessage(message: responseMessage, requestConversationId: requestConversationId)
             }
             else {
@@ -1026,7 +1047,10 @@ extension MessagingVC: MessageBoxDelegate {
                                 print(singlePrompt)
                                 let response = try await session.respond(to: singlePrompt)
                                 print(response)
-                                let responseMessage = MessageStruct(role: "assistant", content: response.content, model: "Apple LLM")
+                                var responseMessage = MessageStruct(role: "assistant", content: response.content, model: "Apple LLM")
+                                if compactionTrigger == .hard {
+                                    responseMessage.content += "\n\n(compacting context in the background)"
+                                }
 
                                 // Persist to the conversation the request originated from
                                 if let target = self.conversationManager.getConversation(by: requestConversationId) {

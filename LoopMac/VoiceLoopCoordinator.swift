@@ -633,9 +633,23 @@ The current date and time is \(now).
         conversationPresenter?.avatarPulse()
         conversationPresenter?.setThinking(true, label: "Thinking…")
 
+        // Opportunistic context compaction: check thresholds and spawn a
+        // background sub-agent if the context is large enough.
+        let compactionTrigger = ContextCompactor.checkAndTrigger(
+            messages: messages,
+            conversationId: conversation.id
+        )
+
         state = .thinking
         Cloud.connection.chat(messages: messages) { [weak self] response, error in
-            DispatchQueue.main.async { self?.handleChatResponse(response, error: error, token: token) }
+            DispatchQueue.main.async {
+                if compactionTrigger == .hard, var r = response {
+                    r.content += "\n\n(compacting context in the background)"
+                    self?.handleChatResponse(r, error: error, token: token)
+                } else {
+                    self?.handleChatResponse(response, error: error, token: token)
+                }
+            }
         }
     }
 
