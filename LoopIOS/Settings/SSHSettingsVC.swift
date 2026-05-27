@@ -38,6 +38,56 @@ final class SSHSettingsVC: UIViewController {
 
         setupLayout()
         loadCurrent()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardFrameWillChange(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillHide(_:)),
+            name: UIResponder.keyboardWillHideNotification,
+            object: nil
+        )
+    }
+
+    @objc private func keyboardFrameWillChange(_ note: Notification) {
+        guard
+            let endFrame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue,
+            let window = view.window
+        else { return }
+        let frameInView = view.convert(endFrame, from: window)
+        let overlap = max(0, scrollView.frame.maxY - frameInView.minY)
+        applyKeyboardInset(overlap, note: note)
+    }
+
+    @objc private func keyboardWillHide(_ note: Notification) {
+        applyKeyboardInset(0, note: note)
+    }
+
+    private func applyKeyboardInset(_ bottom: CGFloat, note: Notification) {
+        let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+        let curveRaw = (note.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int) ?? UIView.AnimationCurve.easeInOut.rawValue
+        let options = UIView.AnimationOptions(rawValue: UInt(curveRaw) << 16)
+
+        UIView.animate(withDuration: duration, delay: 0, options: options, animations: {
+            self.scrollView.contentInset.bottom = bottom
+            self.scrollView.verticalScrollIndicatorInsets.bottom = bottom
+            if bottom > 0, let focused = self.findFirstResponder(in: self.view) {
+                let target = focused.convert(focused.bounds, to: self.scrollView).insetBy(dx: 0, dy: -12)
+                self.scrollView.scrollRectToVisible(target, animated: false)
+            }
+        })
+    }
+
+    private func findFirstResponder(in view: UIView) -> UIView? {
+        if view.isFirstResponder { return view }
+        for sub in view.subviews {
+            if let found = findFirstResponder(in: sub) { return found }
+        }
+        return nil
     }
 
     // MARK: - Layout

@@ -506,6 +506,7 @@ Tips:
         case .xAPISecret:             return "x_api_secret"
         case .xAccessToken:           return "x_access_token"
         case .xAccessTokenSecret:     return "x_access_token_secret"
+        case .sfBayTransit:           return "sf_bay_transit"
         }
     }
 
@@ -566,6 +567,8 @@ Tips:
         case "x_access_token", "twitter_access_token":        return .xAccessToken
         case "x_access_token_secret",
              "twitter_access_token_secret":                   return .xAccessTokenSecret
+        case "sf_bay_transit", "sf_bay_511",
+             "511", "511_sf_bay":                             return .sfBayTransit
         default:                                              return nil
         }
     }
