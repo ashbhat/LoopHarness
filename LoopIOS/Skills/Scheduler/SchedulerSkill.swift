@@ -35,6 +35,10 @@ You can schedule background tasks for the user with these tools:
     - "every day at 9am" → hour=9, minute=0 (default — daily, forever).
     - "tomorrow at 7am" → resolve to YYYY-MM-DD using today's date and pass `date` + `occurrences=1`.
     - "for the next 8 days at 7am" → `occurrences=8`.
+  - weekdays (optional): array of integers specifying which days the task is allowed to fire. 1=Sunday, 2=Monday, …, 7=Saturday. Omit for every day.
+    - "only on weekdays" → weekdays=[2,3,4,5,6] (Mon–Fri).
+    - "weekends only" → weekdays=[1,7] (Sat–Sun).
+    - When a fire time lands on a day not in the list, the task silently skips to the next allowed day.
   - prefetch_window_hours (optional, default 4): how far before fire time iOS is allowed to pre-generate the body so the notification lands with rich content.
     - 6–8 for content stable across the night (calendars, morning quotes, weekly digests). Maximizes happy-path delivery.
     - 2–4 for things that drift a bit (news summaries, market recaps). Default.
@@ -105,6 +109,11 @@ After scheduling, briefly confirm to the user what was set (don't list the id).
                         "date": [
                             "type": "string",
                             "description": "Optional anchor date YYYY-MM-DD for the first firing."
+                        ],
+                        "weekdays": [
+                            "type": "array",
+                            "items": ["type": "integer"],
+                            "description": "Days of the week the task is allowed to fire. 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday. Omit for every day. Example: [2,3,4,5,6] for Monday–Friday."
                         ],
                         "prefetch_window_hours": [
                             "type": "number",
@@ -404,6 +413,17 @@ After scheduling, briefly confirm to the user what was set (don't list the id).
             firstDate = parsed
         }
 
+        // Optional weekdays filter.
+        var weekdays: [Int]? = nil
+        if let raw = args["weekdays"] {
+            if let arr = raw as? [Any] {
+                let parsed = arr.compactMap { intArg($0) }.filter { (1...7).contains($0) }
+                if !parsed.isEmpty {
+                    weekdays = Array(Set(parsed)).sorted()
+                }
+            }
+        }
+
         // Optional prefetch window (clamped to allowed range).
         var window = ScheduledJob.defaultPrefetchHours
         if let raw = args["prefetch_window_hours"], !(raw is NSNull) {
@@ -421,7 +441,8 @@ After scheduling, briefly confirm to the user what was set (don't list the id).
                 minute: minute,
                 occurrences: occurrences,
                 firstDate: firstDate,
-                regenerate: kind == "prompt"
+                regenerate: kind == "prompt",
+                weekdays: weekdays
             ),
             payload: payload,
             prefetchWindowHours: window,
@@ -483,6 +504,9 @@ After scheduling, briefly confirm to the user what was set (don't list the id).
             if let last = job.lastResult { entry["last_result"] = last }
             if let lastAt = job.lastRunAt {
                 entry["last_run_at"] = ISO8601DateFormatter().string(from: lastAt)
+            }
+            if let wd = job.trigger.weekdays, !wd.isEmpty {
+                entry["weekdays"] = wd
             }
             switch job.payload {
             case .prompt(let user, _):

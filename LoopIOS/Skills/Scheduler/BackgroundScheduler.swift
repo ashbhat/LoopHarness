@@ -68,8 +68,19 @@ struct Trigger: Codable {
     /// Default true for prompt payloads (matches spec intent — "review my
     /// calendar each morning" needs fresh content).
     var regenerate: Bool
+    /// Optional weekday filter. Each element is 1 (Sunday) through 7
+    /// (Saturday), matching `Calendar.current.component(.weekday, from:)`.
+    /// nil or empty = every day (backward-compatible default).
+    var weekdays: [Int]? = nil
 
     var isUnbounded: Bool { occurrences == nil }
+
+    /// Whether `date` falls on an allowed weekday.
+    func isAllowedWeekday(_ date: Date, calendar: Calendar = .current) -> Bool {
+        guard let days = weekdays, !days.isEmpty else { return true }
+        let wd = calendar.component(.weekday, from: date)
+        return days.contains(wd)
+    }
 }
 
 /// What the job actually does when it fires.
@@ -266,31 +277,64 @@ final class BackgroundScheduler {
 
     // MARK: - Time helpers
 
-    /// Next future instance of hh:mm. If hh:mm is later today, returns today.
-    /// Otherwise tomorrow.
+    /// Next future instance of hh:mm that also falls on an allowed weekday.
+    /// If hh:mm is later today (and today is allowed), returns today.
+    /// Otherwise advances day-by-day until an allowed weekday is found.
     func nextFireDate(for trigger: Trigger, after now: Date = Date()) -> Date {
         let calendar = Calendar.current
         if let anchor = trigger.firstDate, anchor > now {
-            return anchor
+            // Advance the anchor forward if it doesn't land on an allowed day.
+            return advanceToAllowedWeekday(anchor, trigger: trigger, calendar: calendar)
         }
         var comps = calendar.dateComponents([.year, .month, .day], from: now)
         comps.hour = trigger.hour
         comps.minute = trigger.minute
         comps.second = 0
-        let candidate = calendar.date(from: comps) ?? now
-        if candidate > now { return candidate }
-        return calendar.date(byAdding: .day, value: 1, to: candidate) ?? candidate
+        var candidate = calendar.date(from: comps) ?? now
+        if candidate <= now {
+            candidate = calendar.date(byAdding: .day, value: 1, to: candidate) ?? candidate
+        }
+        return advanceToAllowedWeekday(candidate, trigger: trigger, calendar: calendar)
+    }
+
+    /// Skip forward day-by-day (up to 7 iterations) until the date lands on
+    /// an allowed weekday. Returns the original date when weekdays is nil.
+    private func advanceToAllowedWeekday(_ date: Date, trigger: Trigger, calendar: Calendar) -> Date {
+        guard let days = trigger.weekdays, !days.isEmpty else { return date }
+        var d = date
+        for _ in 0..<7 {
+            if days.contains(calendar.component(.weekday, from: d)) { return d }
+            d = calendar.date(byAdding: .day, value: 1, to: d) ?? d
+        }
+        return d
     }
 
     /// Human-readable schedule label for the Settings list.
     func scheduleDescription(for job: ScheduledJob) -> String {
         let hhmm = String(format: "%02d:%02d", job.trigger.hour, job.trigger.minute)
+        let daysSuffix = weekdaysSuffix(for: job.trigger)
         if let n = job.trigger.occurrences {
-            if n == 1 { return "once at \(hhmm)" }
+            if n == 1 { return "once at \(hhmm)\(daysSuffix)" }
             let left = n - job.firingsCompleted
-            return "\(left)/\(n) firings left at \(hhmm)"
+            return "\(left)/\(n) firings left at \(hhmm)\(daysSuffix)"
         }
-        return "daily at \(hhmm)"
+        return "daily at \(hhmm)\(daysSuffix)"
+    }
+
+    private static let shortDayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+    private func weekdaysSuffix(for trigger: Trigger) -> String {
+        guard let days = trigger.weekdays, !days.isEmpty, days.sorted() != [1,2,3,4,5,6,7] else {
+            return ""
+        }
+        let sorted = days.sorted()
+        if sorted == [2,3,4,5,6] { return " (Mon–Fri)" }
+        if sorted == [1,7] { return " (Sat–Sun)" }
+        let names = sorted.compactMap { d -> String? in
+            guard (1...7).contains(d) else { return nil }
+            return Self.shortDayNames[d - 1]
+        }
+        return " (\(names.joined(separator: ", ")))"
     }
 
     // MARK: - Notification registration
