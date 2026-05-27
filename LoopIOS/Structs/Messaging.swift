@@ -535,6 +535,7 @@ var tools: [[String: Any]] = {
     all += CursorSkill.tools
     all += DevinSkill.tools
     all += TwitterSkill.tools
+    all += SSHSkill.tools
     #if canImport(HealthKit) && os(iOS)
     all += HealthSkill.tools
     #endif
