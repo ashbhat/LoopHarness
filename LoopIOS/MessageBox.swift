@@ -103,6 +103,14 @@ class MessageBox: UIView {
     private var streamingFallbackURL: URL?
     private var streamingDeepgramFailed = false
 
+    // MARK: - Long-press-to-record
+    /// Minimum hold duration before recording begins.
+    private static let longPressThreshold: TimeInterval = 0.6
+    /// True while the user is holding the mic button in long-press-to-record mode.
+    private(set) var isLongPressRecording = false
+    /// "Release to send" tooltip shown above the mic button during long-press recording.
+    private let releaseToSendLabel = UILabel()
+
     private static var deepgramAPIKey: String? {
         return KeyStore.shared.value(for: .deepgram)
     }
@@ -333,7 +341,13 @@ class MessageBox: UIView {
         micButton.backgroundColor = UIColor.systemGray6
         micButton.layer.cornerRadius = 25
         micButton.layer.borderWidth = 0
-        micButton.addTarget(self, action: #selector(micButtonTapped), for: .touchUpInside)
+        let micTapGesture = UITapGestureRecognizer(target: self, action: #selector(micButtonTapped))
+        let micLongPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleMicLongPress(_:)))
+        micLongPressGesture.minimumPressDuration = MessageBox.longPressThreshold
+        micLongPressGesture.allowableMovement = 50
+        micTapGesture.require(toFail: micLongPressGesture)
+        micButton.addGestureRecognizer(micTapGesture)
+        micButton.addGestureRecognizer(micLongPressGesture)
         
         // Recording UI setup
         recordingSendButton.setImage(UIImage(systemName: "arrow.up", withConfiguration: UIImage.SymbolConfiguration(font: UIFont.systemFont(ofSize: 22))), for: .normal)
@@ -365,6 +379,19 @@ class MessageBox: UIView {
         emptyLabel.text = "Ask anything"
         emptyLabel.textColor = .secondaryLabel
         emptyLabel.font = UIFont.preferredFont(forTextStyle: .body)
+
+        // "Release to send" label — hidden by default, shown during long-press recording.
+        releaseToSendLabel.text = "Release to send"
+        releaseToSendLabel.textColor = .secondaryLabel
+        releaseToSendLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
+        releaseToSendLabel.textAlignment = .center
+        releaseToSendLabel.isHidden = true
+        releaseToSendLabel.translatesAutoresizingMaskIntoConstraints = false
+        self.addSubview(releaseToSendLabel)
+        NSLayoutConstraint.activate([
+            releaseToSendLabel.centerXAnchor.constraint(equalTo: micButton.centerXAnchor),
+            releaseToSendLabel.bottomAnchor.constraint(equalTo: micButton.topAnchor, constant: -4)
+        ])
 
         // Initial state: nothing typed, nothing staged → paperclip showing.
         refreshTrailingButton()
@@ -406,7 +433,7 @@ class MessageBox: UIView {
     
     private func updateMicButtonAppearance() {
         // Don't update if recording - recording state takes precedence
-        if currentState == .recording {
+        if currentState == .recording || isLongPressRecording {
             return
         }
         
@@ -578,6 +605,11 @@ class MessageBox: UIView {
 
         VoiceLoopCoordinator.shared.setState(.recording)
         EarconPlayer.shared.play(.listenStart)
+
+        if isLongPressRecording {
+            startMicPulseAnimation()
+            releaseToSendLabel.isHidden = false
+        }
     }
 
     private func switchToTranscribingState() {
@@ -610,6 +642,11 @@ class MessageBox: UIView {
         waveformView.isHidden = true
         recordingSendButton.isHidden = true
         transcribingLabel.isHidden = true
+
+        // Clean up long-press recording state
+        isLongPressRecording = false
+        stopMicPulseAnimation()
+        releaseToSendLabel.isHidden = true
 
         // Reset waveform bars back to their idle baseline. The container's
         // fill no longer changes during recording/transcribing, so there's
@@ -1002,7 +1039,72 @@ class MessageBox: UIView {
             returnToNormalState()
         }
     }
-    
+
+    // MARK: - Long-Press-to-Record
+
+    @objc private func handleMicLongPress(_ gesture: UILongPressGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            if textView.isFirstResponder {
+                textView.resignFirstResponder()
+            }
+            delegate?.stopSpeech()
+
+            guard AVAudioSession.sharedInstance().recordPermission == .granted else {
+                requestMicrophonePermission { _ in }
+                return
+            }
+
+            isLongPressRecording = true
+            let feedback = UIImpactFeedbackGenerator(style: .heavy)
+            feedback.impactOccurred()
+            startRecording()
+
+        case .ended:
+            guard isLongPressRecording else { return }
+            finishLongPressRecording()
+
+        case .cancelled, .failed:
+            guard isLongPressRecording else { return }
+            cancelLongPressRecording()
+
+        default:
+            break
+        }
+    }
+
+    private func finishLongPressRecording() {
+        stopMicPulseAnimation()
+        releaseToSendLabel.isHidden = true
+        isLongPressRecording = false
+        guard currentState == .recording else { return }
+        recordingSendButtonTapped()
+    }
+
+    private func cancelLongPressRecording() {
+        stopMicPulseAnimation()
+        releaseToSendLabel.isHidden = true
+        isLongPressRecording = false
+        if currentState == .recording {
+            if isStreamingSTT { teardownStreaming() }
+            else { stopRecording() }
+            returnToNormalState()
+        }
+    }
+
+    private func startMicPulseAnimation() {
+        UIView.animate(withDuration: 0.6,
+                       delay: 0,
+                       options: [.autoreverse, .repeat, .allowUserInteraction, .curveEaseInOut]) {
+            self.micButton.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
+        }
+    }
+
+    private func stopMicPulseAnimation() {
+        micButton.layer.removeAllAnimations()
+        micButton.transform = .identity
+    }
+
 }
 
 extension MessageBox: UITextViewDelegate {
