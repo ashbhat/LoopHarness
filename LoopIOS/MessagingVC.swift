@@ -3096,6 +3096,11 @@ extension MessagingVC: OnboardingCoordinatorHost, OnboardingCardDelegate {
         let conversation = ensureCurrentConversation()
         let shouldShowThinking = (message.role == "assistant") && !self.messages.isEmpty
         guard shouldShowThinking else {
+            // No thinking beat (first greeting / user echoes), but assistant
+            // prose should still type on — mark it so the cell animates.
+            if message.role == "assistant" {
+                self.messageIdToAnimate = message.id
+            }
             appendOnboardingMessage(message, to: conversation)
             return
         }

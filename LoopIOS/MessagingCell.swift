@@ -66,6 +66,9 @@ class MessagingCell: UITableViewCell {
     private var revealLastTimestamp: CFTimeInterval = 0
     /// Units over which alpha ramps 0→1 — the soft edge that reads as a fade.
     private let revealFadeWindow: CGFloat = 6
+    /// Fired once when the reveal reaches the end naturally (not on cancel /
+    /// reuse). Used by the onboarding path to reveal its pills afterwards.
+    private var revealCompletion: (() -> Void)?
 
     /// Vertical stack used when the assistant message contains a markdown
     /// table. Holds alternating UITextViews (prose segments) and UIViews
@@ -368,6 +371,11 @@ class MessagingCell: UITableViewCell {
         // preview card — the view is reused across cells that render
         // different card kinds.
         onboardingCardView.isHidden = true
+        // Restore full opacity / position — a cell recycled mid type-on
+        // reveal would otherwise carry over the alpha-0 + offset the pill
+        // fade-in started from.
+        onboardingCardView.alpha = 1
+        onboardingCardView.transform = .identity
         onboardingCardView.reset()
         NSLayoutConstraint.deactivate(onboardingCardConstraints)
         onboardingCardConstraints.removeAll()
@@ -469,7 +477,7 @@ class MessagingCell: UITableViewCell {
         // Routed first so it bypasses the image / file / table branches
         // below — onboarding messages never carry those.
         if let card = data.onboardingCard, data.role == "assistant" {
-            applyOnboardingCard(card, accompanyingText: data.content)
+            applyOnboardingCard(card, accompanyingText: data.content, shouldAnimate: shouldAnimate)
             return
         }
         // User-side onboarding echoes (the .done sentinel) render as plain
@@ -735,8 +743,9 @@ class MessagingCell: UITableViewCell {
     /// `animatingtextView`. The base `textView` holds the same text at alpha 0
     /// so the cell reaches its final height up front and the fade plays inside
     /// a fixed frame (no relayout / scroll jump).
-    private func startTypeOnReveal(full: NSAttributedString) {
+    private func startTypeOnReveal(full: NSAttributedString, onComplete: (() -> Void)? = nil) {
         stopTypeOnReveal()
+        revealCompletion = onComplete
 
         // Invisible base layer fixes the final layout/height.
         textView.attributedText = full
@@ -748,6 +757,9 @@ class MessagingCell: UITableViewCell {
             animatingtextView.alpha = 1
             animatingtextView.attributedText = full
             textView.alpha = 1
+            let done = revealCompletion
+            revealCompletion = nil
+            done?()
             return
         }
 
@@ -818,11 +830,16 @@ class MessagingCell: UITableViewCell {
         animatingtextView.attributedText = working
 
         if revealSettledUnits >= count {
+            // Grab the completion before teardown clears it, then fire after —
+            // this is the only path that runs it (cancel / reuse never do).
+            let done = revealCompletion
             stopTypeOnReveal()
+            done?()
         }
     }
 
-    /// Tear down the reveal and free its working state. Idempotent.
+    /// Tear down the reveal and free its working state. Idempotent. Does NOT
+    /// fire `revealCompletion` — only natural completion in step does.
     private func stopTypeOnReveal() {
         revealLink?.invalidate()
         revealLink = nil
@@ -832,6 +849,7 @@ class MessagingCell: UITableViewCell {
         revealSettledUnits = 0
         revealHead = 0
         revealLastTimestamp = 0
+        revealCompletion = nil
     }
 
     /// Split `string` into reveal units: each a run of non-whitespace plus the
@@ -1569,7 +1587,7 @@ class MessagingCell: UITableViewCell {
     /// but the model label is hidden (onboarding turns have no model
     /// attribution). For `.answered`, render just the prose — the chip
     /// row collapses away and the cell shrinks to the height of the bubble.
-    private func applyOnboardingCard(_ kind: OnboardingCardKind, accompanyingText: String) {
+    private func applyOnboardingCard(_ kind: OnboardingCardKind, accompanyingText: String, shouldAnimate: Bool) {
         if onboardingCardView.superview == nil {
             contentView.addSubview(onboardingCardView)
             onboardingCardView.translatesAutoresizingMaskIntoConstraints = false
@@ -1578,11 +1596,18 @@ class MessagingCell: UITableViewCell {
         onboardingCardView.isHidden = !hasInteractiveCard
         onboardingCardView.apply(kind, delegate: onboardingDelegate)
 
+        // Type the prose on for any freshly-arrived prompt with text —
+        // including the terminal `.done` sign-off, which has no pills. The
+        // pill reveal is gated separately on `hasInteractiveCard` below.
+        // Reuse / scroll-back and Reduce Motion render instantly.
+        let animate = shouldAnimate && !accompanyingText.isEmpty
+            && !UIAccessibility.isReduceMotionEnabled
+
         // Visible chrome: just the prompt text and (maybe) the card. Hide
         // everything else that could bleed in via cell reuse.
         profileImageView.isHidden = true
         textView.isHidden = false
-        animatingtextView.isHidden = true
+        animatingtextView.isHidden = !animate
         actionButton.isHidden = true
         shimmerLabel.isHidden = true
         modelLabel.isHidden = true
@@ -1604,16 +1629,31 @@ class MessagingCell: UITableViewCell {
         textView.textContainer.lineFragmentPadding = 0
         textView.isScrollEnabled = false
         textView.isEditable = false
+        animatingtextView.backgroundColor = .clear
+        animatingtextView.textContainerInset = .zero
+        animatingtextView.textContainer.lineFragmentPadding = 0
+        animatingtextView.isScrollEnabled = false
+        animatingtextView.isEditable = false
         // Prompt text runs through the same markdown formatter the regular
-        // assistant path uses (sans streaming animation) so onboarding can
-        // bold key phrases / use inline links to guide the user.
-        textView.attributedText = self.attributedString(from: accompanyingText)
+        // assistant path uses so onboarding can bold key phrases / use inline
+        // links to guide the user.
+        let full = self.attributedString(from: accompanyingText)
+        textView.attributedText = full
 
         textViewConstraints = [
             textView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             textView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
             textView.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -20),
             textView.widthAnchor.constraint(lessThanOrEqualToConstant: 520),
+        ]
+
+        // animatingtextView overlays textView exactly so the fade lands on top
+        // of the (alpha-0) base layer that fixes the cell's final height.
+        animatingTextViewConstraints = [
+            animatingtextView.leadingAnchor.constraint(equalTo: textView.leadingAnchor),
+            animatingtextView.topAnchor.constraint(equalTo: textView.topAnchor),
+            animatingtextView.trailingAnchor.constraint(equalTo: textView.trailingAnchor),
+            animatingtextView.bottomAnchor.constraint(equalTo: textView.bottomAnchor),
         ]
 
         // Bottom anchor depends on whether the card is visible. When the
@@ -1634,6 +1674,42 @@ class MessagingCell: UITableViewCell {
         }
         NSLayoutConstraint.activate(textViewConstraints)
         NSLayoutConstraint.activate(onboardingCardConstraints)
+
+        if animate {
+            // The card's slot is already reserved by the constraints above, so
+            // typing the prose out and then fading the pills in causes no
+            // layout shift. Type on the base (alpha-0) textView, then reveal
+            // the pills on completion.
+            NSLayoutConstraint.activate(animatingTextViewConstraints)
+            // Hold the pills hidden + nudged down until the prose finishes,
+            // then rise them into place. Skipped when there's no interactive
+            // card (e.g. the terminal `.done` sign-off): the text still types
+            // on, there's just nothing to reveal afterwards. The transform is
+            // a transform, not a constraint change, so the reserved slot's
+            // height is untouched and nothing reflows.
+            if hasInteractiveCard {
+                onboardingCardView.alpha = 0
+                onboardingCardView.transform = CGAffineTransform(translationX: 0, y: 8)
+            }
+            startTypeOnReveal(full: full) { [weak self] in
+                guard let self = self, hasInteractiveCard else { return }
+                UIView.animate(withDuration: 0.3,
+                               delay: 0,
+                               usingSpringWithDamping: 0.82,
+                               initialSpringVelocity: 0,
+                               options: [.curveEaseOut]) {
+                    self.onboardingCardView.alpha = 1
+                    self.onboardingCardView.transform = .identity
+                }
+            }
+        } else {
+            // Instant render: full prose, pills already visible.
+            stopTypeOnReveal()
+            textView.alpha = 1
+            animatingtextView.alpha = 0
+            onboardingCardView.alpha = 1
+            onboardingCardView.transform = .identity
+        }
     }
 
     fileprivate func applyFileAttachment(_ attachment: FileAttachment,
