@@ -12,28 +12,67 @@
 //    .apple     → on-device Apple Foundation model (FoundationModels)
 //    .openAI    → OpenAIChat   (direct, user's OPENAI_API_KEY)
 //    .anthropic → AnthropicChat (direct, user's ANTHROPIC_API_KEY)
-//    .kimi      → KimiChat      (direct, user's KIMI_API_KEY → Moonshot API)
+//    .fireworks → FireworksChat  (direct, user's FIREWORKS_API_KEY)
 //  Reachability still wins — offline always falls back to Apple, since the
 //  hosted providers can't work without a network. The selection is just the
 //  user's *preferred* model when the network is available.
 //
 
 import Foundation
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 /// Top-level provider grouping. Drives the Mac menu's submenus and the
 /// AgentHarness routing switch.
 enum ModelProvider: String, CaseIterable {
+
+    /// Whether Apple's on-device Foundation model is usable on this
+    /// device/OS. Returns `false` on pre-iOS 26, when Apple Intelligence
+    /// is disabled, or when the model hasn't finished downloading.
+    static var isAppleFoundationAvailable: Bool {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, macOS 26.0, *) {
+            if case .available = SystemLanguageModel.default.availability {
+                return true
+            }
+        }
+        #endif
+        return false
+    }
+
+    /// The highest-priority provider that already has a usable API key in
+    /// the Keychain. Returns `nil` when no hosted provider is configured.
+    static var firstKeyedProvider: ModelProvider? {
+        let ranked: [(ModelProvider, KeyStore.Key)] = [
+            (.anthropic, .anthropic),
+            (.openAI, .openAI),
+            (.fireworks, .fireworks),
+        ]
+        for (provider, key) in ranked {
+            if KeyStore.shared.source(for: key) != .missing {
+                return provider
+            }
+        }
+        return nil
+    }
+
+    /// `true` when at least one hosted-provider API key is configured.
+    static var hasAnyProviderKey: Bool {
+        firstKeyedProvider != nil
+    }
+
     case apple
     case openAI
     case anthropic
-    case kimi
+    case fireworks
 
     var displayName: String {
         switch self {
         case .apple:     return "Apple"
         case .openAI:    return "OpenAI"
         case .anthropic: return "Anthropic"
-        case .kimi:      return "Kimi"
+        case .fireworks: return "Fireworks"
         }
     }
 }
@@ -55,8 +94,8 @@ enum ModelSelection: String, CaseIterable {
     case claudeSonnet46 = "claudeSonnet46"
     case claudeHaiku45  = "claudeHaiku45"
 
-    // Moonshot / Kimi.
-    case kimiK26 = "kimiK26"
+    // Fireworks — Kimi K2.6 served via Fireworks inference.
+    case fireworksKimiK26 = "fireworksKimiK26"
 
     var provider: ModelProvider {
         switch self {
@@ -66,8 +105,8 @@ enum ModelSelection: String, CaseIterable {
             return .openAI
         case .claudeOpus47, .claudeSonnet46, .claudeHaiku45:
             return .anthropic
-        case .kimiK26:
-            return .kimi
+        case .fireworksKimiK26:
+            return .fireworks
         }
     }
 
@@ -82,7 +121,7 @@ enum ModelSelection: String, CaseIterable {
         case .claudeOpus47:    return "Claude Opus 4.7"
         case .claudeSonnet46:  return "Claude Sonnet 4.6"
         case .claudeHaiku45:   return "Claude Haiku 4.5"
-        case .kimiK26:         return "Kimi K2.6"
+        case .fireworksKimiK26: return "Kimi K2.6"
         }
     }
 
@@ -100,7 +139,7 @@ enum ModelSelection: String, CaseIterable {
         case .claudeOpus47:    return "claude-opus-4-7"
         case .claudeSonnet46:  return "claude-sonnet-4-6"
         case .claudeHaiku45:   return "claude-haiku-4-5-20251001"
-        case .kimiK26:         return "kimi-k2.6"
+        case .fireworksKimiK26: return "accounts/fireworks/models/kimi-k2p6"
         }
     }
 
@@ -111,6 +150,29 @@ enum ModelSelection: String, CaseIterable {
         case .apple: return "Apple LLM"
         default:     return displayName
         }
+    }
+
+    /// Total context window size in tokens, or `nil` when the limit is
+    /// unknown (Apple on-device model). Used to compute the "Context X%"
+    /// byline chip after each assistant response.
+    var contextWindowSize: Int? {
+        switch self {
+        case .appleFoundation:  return nil
+        case .gpt55:            return 1_048_576
+        case .gpt51:            return 1_048_576
+        case .gpt41:            return 1_048_576
+        case .gpt4o:            return 128_000
+        case .claudeOpus47:     return 200_000
+        case .claudeSonnet46:   return 200_000
+        case .claudeHaiku45:    return 200_000
+        case .fireworksKimiK26: return 131_072
+        }
+    }
+
+    /// Look up a model's context window by its `stampedMessageModel` label.
+    /// Returns `nil` when the label doesn't match any known model.
+    static func contextWindowSize(forStamp stamp: String) -> Int? {
+        allCases.first { $0.stampedMessageModel == stamp }?.contextWindowSize
     }
 
     /// Models for a provider, in menu order.
@@ -128,7 +190,7 @@ enum ModelSelection: String, CaseIterable {
         case .apple:     return nil
         case .openAI:    return .openAI
         case .anthropic: return .anthropic
-        case .kimi:      return .kimi
+        case .fireworks: return .fireworks
         }
     }
 }
@@ -137,16 +199,16 @@ enum ModelSelectionStore {
     private static let defaultsKey = "loop.modelSelection"
 
     /// Current user selection. With no explicit pick yet, prefer Kimi K2.6
-    /// when a `KIMI_API_KEY` is bundled (or stored) so a fresh build with the
-    /// key in Secrets.xcconfig comes up on Kimi without the user having to
-    /// open Settings ▸ Model. Otherwise fall back to `.appleFoundation`,
-    /// which runs on-device and needs no key.
+    /// via Fireworks when a `FIREWORKS_API_KEY` is bundled (or stored) so a
+    /// fresh build with the key in Secrets.xcconfig comes up on Kimi K2.6
+    /// without the user having to open Settings ▸ Model. Otherwise fall back
+    /// to `.appleFoundation`, which runs on-device and needs no key.
     static var current: ModelSelection {
         get {
             let raw = iCloudKVSDefaults.shared.string(forKey: defaultsKey) ?? ""
             if let stored = ModelSelection(rawValue: raw) { return stored }
-            if KeyStore.shared.source(for: .kimi) != .missing {
-                return .kimiK26
+            if KeyStore.shared.source(for: .fireworks) != .missing {
+                return .fireworksKimiK26
             }
             return .appleFoundation
         }

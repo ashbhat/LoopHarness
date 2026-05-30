@@ -272,12 +272,18 @@ The current date and time is \(now).
         // Stop any in-progress speech playback.
         speechPlayer.stop()
 
-        // Pick STT path: Deepgram online (lower latency, better partials),
-        // Apple SFSpeechRecognizer when offline OR the Deepgram key is
-        // missing. The latter mirrors iOS's MessageBox fallthrough — if a
-        // user hasn't entered a Deepgram key yet, they still get voice via
-        // the on-device path.
-        let useApple = !Reachability.isOnline || Self.deepgramAPIKey == nil
+        // Pick STT path. `STTProviderStore.current` is `.auto` by default and
+        // reproduces the historical heuristic — Deepgram online (lower
+        // latency, better partials) and Apple SFSpeechRecognizer when offline
+        // or the Deepgram key is missing. The user can pin either engine in
+        // Settings ▸ Model ▸ STT on iOS; the same store syncs over iCloud-KVS
+        // so the Mac respects the override here.
+        let useApple: Bool
+        switch STTProviderStore.current {
+        case .apple:    useApple = true
+        case .deepgram: useApple = (Self.deepgramAPIKey == nil)
+        case .auto:     useApple = !Reachability.isOnline || Self.deepgramAPIKey == nil
+        }
 
         // Mac mic permission. We use AVCaptureDevice (not
         // AVAudioApplication.recordPermission) because the latter has a
@@ -589,6 +595,16 @@ The current date and time is \(now).
     /// telemetry), the other inherits it.
     private func sendTurn(userMessage: MessageStruct) {
         guard let conversation = conversation else { return }
+
+        // Cancel any in-flight TTS immediately. The user just sent a new
+        // message, so continuing to read the previous response aloud is
+        // stale and disorienting — silence it before the earcon so the
+        // "sent" chime isn't fighting the tail of the old speech.
+        if state == .speaking {
+            speechPlayer.stop()
+            state = .idle
+        }
+
         EarconPlayer.shared.play(.listenSend)
         SimpleConversationManager.shared.addMessage(userMessage, to: conversation)
         // Refresh our snapshot from the store by *this* coordinator's id,
@@ -617,9 +633,23 @@ The current date and time is \(now).
         conversationPresenter?.avatarPulse()
         conversationPresenter?.setThinking(true, label: "Thinking…")
 
+        // Opportunistic context compaction: check thresholds and spawn a
+        // background sub-agent if the context is large enough.
+        let compactionTrigger = ContextCompactor.checkAndTrigger(
+            messages: messages,
+            conversationId: conversation.id
+        )
+
         state = .thinking
         Cloud.connection.chat(messages: messages) { [weak self] response, error in
-            DispatchQueue.main.async { self?.handleChatResponse(response, error: error, token: token) }
+            DispatchQueue.main.async {
+                if compactionTrigger == .hard, var r = response {
+                    r.content += "\n\n(compacting context in the background)"
+                    self?.handleChatResponse(r, error: error, token: token)
+                } else {
+                    self?.handleChatResponse(response, error: error, token: token)
+                }
+            }
         }
     }
 

@@ -88,16 +88,31 @@ final class OnboardingCoordinator {
     /// this at app launch, before the chat opens. Default `false` (iOS).
     var skipActionButtonStep: Bool = false
 
+    /// When true, `resumeIfNeeded()` seeds first-launch state but does NOT
+    /// auto-post the greeting — instead, `handleUserText` posts the user's
+    /// first typed message as a bubble and then fires the greeting in
+    /// response. The Mac panel host enables this so the conversation opens
+    /// blank (the user types first, the harness greets them back); iOS leaves
+    /// it false so the chat surface opens with the script already mid-flight.
+    var deferGreetingUntilFirstMessage: Bool = false
+
+    /// Internal latch flipped on by `resumeIfNeeded()` when
+    /// `deferGreetingUntilFirstMessage` is honored. Drives the one-shot
+    /// "user opener → greeting" reroute in `handleUserText`, then resets so
+    /// subsequent typed inputs flow through the regular state machine.
+    private var awaitingFirstUserInput: Bool = false
+
     /// Opaque chip identifiers. Kept here (not in `OnboardingCardKind`)
     /// because their meaning is only relevant inside this coordinator's
     /// switch. Labels are separate so we can tune copy without breaking the
     /// id-based switch logic.
     private enum ChipId {
         static let useDefaultName    = "name.default"
+        static let stayOnCurrent     = "model.stay"
         static let modelApple        = "model.apple"
         static let modelClaude       = "model.claude"
         static let modelOpenAI       = "model.openai"
-        static let modelKimi         = "model.kimi"
+        static let modelFireworks    = "model.fireworks"
         static let skipKey           = "key.skip"
         static let connectNotion     = "integration.notion"
         static let connectGitHub     = "integration.github"
@@ -137,6 +152,14 @@ final class OnboardingCoordinator {
     /// callbacks synchronously.
     private var isAdvancing = false
 
+    /// True between firing `extractName(...)` for the `.askName` step and that
+    /// extraction's completion landing. Used to swallow follow-up messages the
+    /// user sends while the model is still resolving the first reply — without
+    /// this guard, a second send races the first and overwrites the name
+    /// (e.g. user types "Loop", then impatiently types "did that work?"; the
+    /// second message would otherwise become the assistant's name).
+    private var isExtractingName = false
+
     private init() {}
 
     // MARK: - Public entry points
@@ -153,6 +176,7 @@ final class OnboardingCoordinator {
         hasResumed = false
         currentStep = .greeting
         pendingKeyProvider = nil
+        awaitingFirstUserInput = false
     }
 
     func resumeIfNeeded() {
@@ -163,20 +187,24 @@ final class OnboardingCoordinator {
         let resumed = StepID(rawValue: OnboardingState.lastStep) ?? .greeting
         currentStep = resumed
 
-        // First launch: explicitly pin Apple Foundation Model so the user
-        // can chat from message one without an API key, regardless of what
-        // bundled keys (e.g. KIMI_API_KEY in Secrets.xcconfig on dev builds)
-        // would otherwise cause ModelSelectionStore to default to. The
-        // model-choice step lets them opt into a hosted provider.
-        //
-        // Also seed the self-docs (SOUL/USER/MEMORY/AGENTS/HEARTBEAT) into
-        // the iCloud workspace so the user can browse + edit them in the
-        // Files app from day one. `seedSelfDocsIfMissing` skips files that
-        // already exist, so a user resuming onboarding on a second device
-        // doesn't overwrite anything they already edited.
+        // First launch: seed the self-docs and pick a sensible starting
+        // model. If the user already has a hosted-provider key (TestFlight,
+        // Secrets.xcconfig, iCloud-KVS sync), let `ModelSelectionStore`'s
+        // default logic pick that provider — pinning Apple would hide a
+        // working key and make the greeting inaccurate. Pin Apple only when
+        // no hosted key exists.
         if resumed == .greeting {
-            pinAppleFoundationModel()
+            if !ModelProvider.hasAnyProviderKey {
+                pinAppleFoundationModel()
+            }
             AgentHarness.shared.seedSelfDocsIfMissing()
+            if deferGreetingUntilFirstMessage {
+                // Host wants the greeting to land as a *reply* to the user's
+                // opener, so hold the post. `handleUserText` will fire it
+                // after echoing the user's bubble.
+                awaitingFirstUserInput = true
+                return
+            }
         }
         post(currentStep)
     }
@@ -193,6 +221,18 @@ final class OnboardingCoordinator {
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return true }
+
+        // Deferred-greeting path (Mac panel): the user's first typed input
+        // becomes the conversation opener. Echo it as a plain user bubble,
+        // then fire the greeting as if the harness were replying. Reset the
+        // latch so subsequent inputs flow through the regular state machine.
+        if awaitingFirstUserInput {
+            awaitingFirstUserInput = false
+            echoUser(trimmed)
+            post(.greeting)
+            return true
+        }
+
         let lower = trimmed.lowercased()
 
         switch currentStep {
@@ -200,9 +240,20 @@ final class OnboardingCoordinator {
         case .greeting, .modelChoice:
             // Step 1 is now model setup, not name. Free text is interpreted
             // as a model pick (fuzzy keyword match) — anything else just
-            // re-shows the chip row.
-            if lower.contains("apple") || lower == "stay" || lower.contains("on-device") {
-                commitAnswer(echo: "Stay on Apple")
+            // re-shows the chip row. "stay" / "skip" / a word that matches
+            // the current model's display name all keep the active model.
+            let current = ModelSelectionStore.current
+            let currentProvider = current.provider
+            let currentName = current.displayName.lowercased()
+            if lower == "stay" || lower == "skip" || lower.contains(currentName) {
+                commitAnswer(echo: "Stay on \(current.displayName)")
+                advance(to: .integrationsOffer)
+            } else if lower.contains("apple") || lower.contains("on-device") {
+                guard ModelProvider.isAppleFoundationAvailable else {
+                    echoUser(trimmed); break
+                }
+                let echo = currentProvider == .apple ? "Stay on Apple" : "Use Apple"
+                commitAnswer(echo: echo)
                 pinAppleFoundationModel()
                 advance(to: .integrationsOffer)
             } else if lower.contains("claude") || lower.contains("anthropic") {
@@ -217,16 +268,12 @@ final class OnboardingCoordinator {
                 pendingKeyProvider = .openAI
                 selectModel(for: .openAI)
                 advanceAfterModelPick(.openAI)
-            } else if lower.contains("kimi") || lower.contains("moonshot") {
-                let verb = KeyStore.shared.source(for: .kimi) != .missing ? "Use" : "Add"
-                commitAnswer(echo: "\(verb) Kimi")
-                pendingKeyProvider = .kimi
-                selectModel(for: .kimi)
-                advanceAfterModelPick(.kimi)
-            } else if lower == "skip" {
-                commitAnswer(echo: "Skip")
-                pinAppleFoundationModel()
-                advance(to: .integrationsOffer)
+            } else if lower.contains("fireworks") || lower.contains("kimi") {
+                let verb = KeyStore.shared.source(for: .fireworks) != .missing ? "Use" : "Add"
+                commitAnswer(echo: "\(verb) Fireworks")
+                pendingKeyProvider = .fireworks
+                selectModel(for: .fireworks)
+                advanceAfterModelPick(.fireworks)
             } else {
                 echoUser(trimmed)
             }
@@ -237,10 +284,28 @@ final class OnboardingCoordinator {
             // Buddy" or "How about Loop?" resolve to just the name. The
             // model was already set up in step 1, so a single short prompt
             // here is cheap and honors the user's provider pick.
+            //
+            // If an extraction is already in flight, echo the user's message
+            // so they can see it was received but skip kicking off a second
+            // resolution — the first reply still wins and gets to name the
+            // assistant. Without this, an impatient follow-up ("did that
+            // work?") races the first call and the late completion clobbers
+            // the chosen name + re-posts the greeting.
+            if isExtractingName {
+                echoUser(trimmed)
+                return true
+            }
             commitAnswer(echo: trimmed)
+            isExtractingName = true
             extractName(from: trimmed) { [weak self] name in
+                guard let self = self else { return }
+                self.isExtractingName = false
+                // Belt-and-suspenders: if anything else has already advanced
+                // us past .askName (e.g. a chip tap raced the model reply),
+                // don't overwrite the name or re-fire `.done` from here.
+                guard self.currentStep == .askName else { return }
                 OnboardingState.assistantName = name
-                self?.advance(to: .done)
+                self.advance(to: .done)
             }
 
         case .keyPaste:
@@ -364,6 +429,14 @@ final class OnboardingCoordinator {
         // Model picks fire from .greeting now (the first step). .modelChoice
         // is kept in the same row only so a user mid-flow at the old `1`
         // raw value resumes onto the same logic.
+        case (.greeting, ChipId.stayOnCurrent),
+             (.modelChoice, ChipId.stayOnCurrent):
+            // "Stay on <current>" — keep whatever the harness is already
+            // running (Apple if no key, Fireworks Kimi if a Fireworks key is
+            // bundled, etc.). No model write, no key paste.
+            commitAnswer(echo: label)
+            advance(to: .integrationsOffer)
+
         case (.greeting, ChipId.modelApple),
              (.modelChoice, ChipId.modelApple):
             commitAnswer(echo: label)
@@ -388,12 +461,12 @@ final class OnboardingCoordinator {
             selectModel(for: .openAI)
             advanceAfterModelPick(.openAI)
 
-        case (.greeting, ChipId.modelKimi),
-             (.modelChoice, ChipId.modelKimi):
+        case (.greeting, ChipId.modelFireworks),
+             (.modelChoice, ChipId.modelFireworks):
             commitAnswer(echo: label)
-            pendingKeyProvider = .kimi
-            selectModel(for: .kimi)
-            advanceAfterModelPick(.kimi)
+            pendingKeyProvider = .fireworks
+            selectModel(for: .fireworks)
+            advanceAfterModelPick(.fireworks)
 
         case (.keyPaste, ChipId.skipKey):
             commitAnswer(echo: label)
@@ -572,20 +645,44 @@ final class OnboardingCoordinator {
             // provider already exists (typed in via Settings, synced via
             // iCloud-KVS, or bundled). Tapping "Use" skips the key-paste
             // step entirely.
+            let current = ModelSelectionStore.current
+            let currentProvider = current.provider
             let claudeLabel = KeyStore.shared.source(for: .anthropic) != .missing
                 ? "Use Claude" : "Add Claude"
             let openAILabel = KeyStore.shared.source(for: .openAI) != .missing
                 ? "Use OpenAI" : "Add OpenAI"
-            let kimiLabel = KeyStore.shared.source(for: .kimi) != .missing
-                ? "Use Kimi" : "Add Kimi"
+            let fireworksLabel = KeyStore.shared.source(for: .fireworks) != .missing
+                ? "Use Fireworks" : "Add Fireworks"
+            let greetingText: String
+            if ModelProvider.hasAnyProviderKey {
+                greetingText = "Nice to meet you! **Let's get set up with this Harness.**\n\nI'm running inference with \(current.displayName). Want to try something else? Tap or type below to plug in a key."
+            } else {
+                greetingText = "Nice to meet you! **Let's get set up with this Harness.**\n\nI'm running inference with Apple's on-device model right now (free, private, but limited). Want something **more capable**? Plug in a key."
+            }
+
+            // First chip always says "Stay on <current model>" and keeps the
+            // active selection — the other chips switch to a different
+            // provider, and we drop the duplicate for whichever provider is
+            // already current.
+            var chips: [OnboardingChoiceOption] = [
+                .init(id: ChipId.stayOnCurrent, label: "Stay on \(current.displayName)")
+            ]
+            if currentProvider != .apple && ModelProvider.isAppleFoundationAvailable {
+                chips.append(.init(id: ChipId.modelApple, label: "Use Apple"))
+            }
+            if currentProvider != .anthropic {
+                chips.append(.init(id: ChipId.modelClaude, label: claudeLabel))
+            }
+            if currentProvider != .openAI {
+                chips.append(.init(id: ChipId.modelOpenAI, label: openAILabel))
+            }
+            if currentProvider != .fireworks {
+                chips.append(.init(id: ChipId.modelFireworks, label: fireworksLabel))
+            }
+
             return assistantMessage(
-                text: "Nice to meet you! **Let's get set up with this Harness.**\n\nI'm running inference with Apple's on-device model right now (free, private, but limited). Want something **more capable**? Plug in a key.",
-                card: .suggestions(options: [
-                    .init(id: ChipId.modelApple,  label: "Stay on Apple"),
-                    .init(id: ChipId.modelClaude, label: claudeLabel),
-                    .init(id: ChipId.modelOpenAI, label: openAILabel),
-                    .init(id: ChipId.modelKimi,   label: kimiLabel),
-                ]))
+                text: greetingText,
+                card: .suggestions(options: chips))
 
         case .askName:
             // Final step — collected after the model + integrations + voice
@@ -756,7 +853,7 @@ final class OnboardingCoordinator {
     // MARK: - Model selection side effects
 
     /// Pin Apple Foundation Model so the user can chat immediately, even on
-    /// dev builds that ship with a bundled Kimi key. Routes through
+    /// dev builds that ship with a bundled Fireworks key. Routes through
     /// `ModelSelectionStore.current` (not raw `iCloudKVSDefaults.set`) so
     /// the `modelSelectionChanged` notification fires for any listeners.
     private func pinAppleFoundationModel() {
@@ -765,14 +862,15 @@ final class OnboardingCoordinator {
 
     /// Set the flagship model for the given provider as the active selection
     /// so the next message routes through it. Called when the user picks a
-    /// provider chip (Claude/OpenAI/Kimi) AND again when they actually paste
-    /// a key — both writes are idempotent. Mirrors what ModelPickerVC does.
+    /// provider chip (Claude/OpenAI/Fireworks) AND again when they actually
+    /// paste a key — both writes are idempotent. Mirrors what ModelPickerVC
+    /// does.
     private func selectModel(for key: KeyStore.Key) {
         let selection: ModelSelection?
         switch key {
         case .anthropic: selection = .claudeSonnet46
         case .openAI:    selection = .gpt55
-        case .kimi:      selection = .kimiK26
+        case .fireworks: selection = .fireworksKimiK26
         default:         selection = nil
         }
         if let s = selection {

@@ -128,6 +128,12 @@ final class SkillDispatcher {
         if TwitterSkill.shared.handles(functionName: call.name) {
             TwitterSkill.shared.handle(functionCall: call, completion: completion); return
         }
+        if SSHSkill.shared.handles(functionName: call.name) {
+            SSHSkill.shared.handle(functionCall: call, completion: completion); return
+        }
+        if MuniRealtimeSkill.shared.handles(functionName: call.name) {
+            MuniRealtimeSkill.shared.handle(functionCall: call, completion: completion); return
+        }
         #if canImport(HealthKit) && os(iOS)
         if HealthSkill.shared.handles(functionName: call.name) {
             HealthSkill.shared.handle(functionCall: call, completion: completion); return

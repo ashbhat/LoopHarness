@@ -127,6 +127,7 @@ final class AgentHarness {
             ("Cursor",           "Dispatch coding tasks to Cursor cloud agents (opens PRs)"),
             ("Devin",            "Dispatch coding tasks to Devin cloud agents (opens PRs, live transcript)"),
             ("X (Twitter)",      "Post tweets to X (Twitter) with confirmation"),
+            ("SSH",              "Execute shell commands on a remote host via SSH"),
         ]
         #if canImport(HealthKit) && os(iOS)
         catalog.append(("Apple Health", "Read-only access to steps, distance, workouts, heart rate, sleep, body mass"))
@@ -160,6 +161,7 @@ final class AgentHarness {
             CursorSkill.systemPromptFragment,
             DevinSkill.systemPromptFragment,
             TwitterSkill.systemPromptFragment,
+            SSHSkill.systemPromptFragment,
         ]
         #if canImport(HealthKit) && os(iOS)
         fragments.append(HealthSkill.systemPromptFragment)
@@ -393,8 +395,8 @@ final class AgentHarness {
             AnthropicChat.shared.chat(messages: rebuilt, tools: toolsToSend, completion: completion)
         case .openAI:
             OpenAIChat.shared.chat(messages: rebuilt, tools: toolsToSend, completion: completion)
-        case .kimi:
-            KimiChat.shared.chat(messages: rebuilt, tools: toolsToSend, completion: completion)
+        case .fireworks:
+            FireworksChat.shared.chat(messages: rebuilt, tools: toolsToSend, completion: completion)
         case .apple:
             // Unreachable — `.apple` returned via offlineRespond above. Kept
             // so the switch stays exhaustive if providers are added.

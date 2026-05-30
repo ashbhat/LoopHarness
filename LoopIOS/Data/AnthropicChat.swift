@@ -119,11 +119,20 @@ final class AnthropicChat {
                 .filter { ($0["type"] as? String) == "text" }
                 .compactMap { $0["text"] as? String }
                 .joined(separator: "\n")
+            var usage: TokenUsage? = nil
+            if let u = json["usage"] as? [String: Any],
+               let input = u["input_tokens"] as? Int,
+               let output = u["output_tokens"] as? Int {
+                usage = TokenUsage(promptTokens: input,
+                                   completionTokens: output,
+                                   totalTokens: input + output)
+            }
             let msg = MessageStruct(
                 role: "assistant",
                 content: text,
                 model: ModelSelectionStore.current.stampedMessageModel,
-                functions: calls)
+                functions: calls,
+                tokenUsage: usage)
             completion(msg, nil)
         }
         task.resume()

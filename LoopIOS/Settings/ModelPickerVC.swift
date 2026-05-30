@@ -2,28 +2,51 @@
 //  ModelPickerVC.swift
 //  Loop
 //
-//  iOS counterpart to the Mac "Model" menu. Lists every `ModelSelection`
-//  case grouped into a section per `ModelProvider` (Apple / OpenAI /
-//  Anthropic), with a checkmark on the active pick. Tapping a row writes
-//  `ModelSelectionStore.current` — the same iCloud-KVS-backed store the
-//  Mac menu and AgentHarness read — so the choice syncs across devices.
+//  Settings ▸ Model. Three sub-screens behind a segmented control:
+//  Inference, STT, and TTS. All three persist to iCloud-KVS via their
+//  respective stores (ModelSelectionStore, STTProviderStore,
+//  TTSProviderStore) so picks survive relaunches and sync across devices.
 //
-//  Per-provider footers tell the user what each group needs: Apple runs
-//  on-device with no key, the hosted providers need their API key set
-//  (we surface whether it's configured so an unusable pick is obvious
-//  before the next turn fails with a "model not found"/auth error).
+//  Each segment owns its own data source, footer copy, and "needs key"
+//  prompt. The Apple ▸ Inference flow stays grouped by provider; STT and
+//  TTS are flat lists since there are only a handful of choices and no
+//  meaningful sub-grouping.
 //
 
 import UIKit
 
 final class ModelPickerVC: UIViewController {
 
+    /// Which sub-screen the user is looking at. Order matches the segmented
+    /// control's segment indices.
+    private enum Segment: Int, CaseIterable {
+        case inference = 0
+        case stt       = 1
+        case tts       = 2
+
+        var title: String {
+            switch self {
+            case .inference: return "Inference"
+            case .stt:       return "STT"
+            case .tts:       return "TTS"
+            }
+        }
+    }
+
+    private let segmentedControl = UISegmentedControl(items: Segment.allCases.map { $0.title })
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
 
-    /// Providers that actually have at least one model, in `ModelProvider`
-    /// order. Computed once: the model catalog is static for the app's life.
-    private let providers: [ModelProvider] = ModelProvider.allCases.filter {
-        !ModelSelection.models(for: $0).isEmpty
+    private var segment: Segment = .inference {
+        didSet { tableView.reloadData() }
+    }
+
+    /// Providers that actually have at least one inference model, in
+    /// `ModelProvider` order. Apple is excluded when Foundation Models
+    /// aren't available on this device/OS so the user never sees an
+    /// option that would fail.
+    private lazy var inferenceProviders: [ModelProvider] = ModelProvider.allCases.filter {
+        if $0 == .apple { return ModelProvider.isAppleFoundationAvailable }
+        return !ModelSelection.models(for: $0).isEmpty
     }
 
     override func viewDidLoad() {
@@ -31,15 +54,24 @@ final class ModelPickerVC: UIViewController {
         title = "Model"
         view.backgroundColor = .systemGroupedBackground
 
+        segmentedControl.translatesAutoresizingMaskIntoConstraints = false
+        segmentedControl.selectedSegmentIndex = 0
+        segmentedControl.addTarget(self, action: #selector(segmentChanged), for: .valueChanged)
+        view.addSubview(segmentedControl)
+
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.dataSource = self
         tableView.delegate = self
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "model")
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
+            segmentedControl.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
+            segmentedControl.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
+            segmentedControl.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            tableView.topAnchor.constraint(equalTo: segmentedControl.bottomAnchor, constant: 12),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
@@ -53,16 +85,26 @@ final class ModelPickerVC: UIViewController {
         )
     }
 
+    @objc private func segmentChanged() {
+        guard let s = Segment(rawValue: segmentedControl.selectedSegmentIndex) else { return }
+        segment = s
+    }
+
     @objc private func reload() {
         tableView.reloadData()
     }
 
-    private func models(in section: Int) -> [ModelSelection] {
-        ModelSelection.models(for: providers[section])
+    private func keyConfigured(_ key: KeyStore.Key) -> Bool {
+        KeyStore.shared.source(for: key) != .missing
     }
 
-    /// Footer copy describing what the provider's section needs to work.
-    private func footer(for provider: ModelProvider) -> String {
+    // MARK: - Inference data source
+
+    private func inferenceModels(in section: Int) -> [ModelSelection] {
+        ModelSelection.models(for: inferenceProviders[section])
+    }
+
+    private func inferenceFooter(for provider: ModelProvider) -> String {
         switch provider {
         case .apple:
             return "Runs on-device. No API key or network required — also used automatically whenever you're offline."
@@ -74,82 +116,170 @@ final class ModelPickerVC: UIViewController {
             return keyConfigured(.anthropic)
                 ? "Uses your Anthropic API key."
                 : "Needs an Anthropic API key. Add one in Settings ▸ Keys."
-        case .kimi:
-            return keyConfigured(.kimi)
-                ? "Uses your Kimi (Moonshot) API key."
-                : "Needs a Kimi API key. Add one in Settings ▸ Keys."
+        case .fireworks:
+            return keyConfigured(.fireworks)
+                ? "Uses your Fireworks API key."
+                : "Needs a Fireworks API key. Add one in Settings ▸ Keys."
         }
-    }
-
-    private func keyConfigured(_ key: KeyStore.Key) -> Bool {
-        KeyStore.shared.source(for: key) != .missing
     }
 }
 
+// MARK: - Table view
+
 extension ModelPickerVC: UITableViewDataSource, UITableViewDelegate {
+
     func numberOfSections(in tableView: UITableView) -> Int {
-        providers.count
+        switch segment {
+        case .inference: return inferenceProviders.count
+        case .stt, .tts: return 1
+        }
     }
 
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        providers[section].displayName
+        switch segment {
+        case .inference: return inferenceProviders[section].displayName
+        case .stt:       return "Speech-to-Text"
+        case .tts:       return "Text-to-Speech"
+        }
     }
 
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        footer(for: providers[section])
+        switch segment {
+        case .inference:
+            return inferenceFooter(for: inferenceProviders[section])
+        case .stt:
+            return "Used when you hold the mic button or trigger voice via the Action Button. Auto picks the best engine for your network."
+        case .tts:
+            return "How the assistant's replies are spoken. The on-device option runs without a network. Each cloud option needs its own key in Settings ▸ Keys."
+        }
     }
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        models(in: section).count
+        switch segment {
+        case .inference: return inferenceModels(in: section).count
+        case .stt:       return STTProvider.allCases.count
+        case .tts:       return TTSProvider.allCases.count
+        }
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "model", for: indexPath)
-        let model = models(in: indexPath.section)[indexPath.row]
         var config = cell.defaultContentConfiguration()
-        config.text = model.displayName
+
+        switch segment {
+        case .inference:
+            let model = inferenceModels(in: indexPath.section)[indexPath.row]
+            config.text = model.displayName
+            cell.accessoryType = (model == ModelSelectionStore.current) ? .checkmark : .none
+
+        case .stt:
+            let stt = STTProvider.allCases[indexPath.row]
+            config.text = stt.displayName
+            config.secondaryText = stt.summary
+            config.secondaryTextProperties.numberOfLines = 0
+            cell.accessoryType = (stt == STTProviderStore.current) ? .checkmark : .none
+
+        case .tts:
+            let tts = TTSProvider.allCases[indexPath.row]
+            config.text = tts.displayName
+            config.secondaryText = ttsRowSubtitle(for: tts)
+            config.secondaryTextProperties.numberOfLines = 0
+            cell.accessoryType = (tts == TTSProviderStore.current) ? .checkmark : .none
+        }
+
         cell.contentConfiguration = config
-        cell.accessoryType = (model == ModelSelectionStore.current) ? .checkmark : .none
         return cell
+    }
+
+    /// One-line description per TTS provider, with a key-status badge so
+    /// the user can tell at a glance which providers will actually work.
+    private func ttsRowSubtitle(for tts: TTSProvider) -> String {
+        if let key = TTSProviderStore.requiredKey(for: tts) {
+            let configured = keyConfigured(key)
+            return configured
+                ? "Uses your \(key.displayName)"
+                : "Needs your \(key.displayName) — add it in Settings ▸ Keys"
+        }
+        return "On-device. No network, no API key."
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        let picked = models(in: indexPath.section)[indexPath.row]
-        guard picked != ModelSelectionStore.current else { return }
 
-        // If the model needs a hosted-provider key the user hasn't set yet,
-        // confirm before applying the pick — otherwise the next turn would
-        // auth-fail with no explanation. The user can either jump straight to
-        // the key entry page (selection still applied) or back out.
-        if let key = picked.requiredKey, KeyStore.shared.source(for: key) == .missing {
-            promptForMissingKey(model: picked, key: key)
-            return
+        switch segment {
+        case .inference:
+            let picked = inferenceModels(in: indexPath.section)[indexPath.row]
+            applyInference(picked)
+        case .stt:
+            let picked = STTProvider.allCases[indexPath.row]
+            applySTT(picked)
+        case .tts:
+            let picked = TTSProvider.allCases[indexPath.row]
+            applyTTS(picked)
         }
-
-        apply(picked)
     }
 
-    /// Commit the pick and refresh the checkmark. Reloads every section so the
-    /// checkmark moves correctly when the previous pick was in a different
-    /// provider's section.
-    private func apply(_ model: ModelSelection) {
+    // MARK: Inference apply
+
+    private func applyInference(_ model: ModelSelection) {
+        guard model != ModelSelectionStore.current else { return }
+        if let key = model.requiredKey, KeyStore.shared.source(for: key) == .missing {
+            promptForMissingKey(label: model.displayName, key: key) { [weak self] in
+                ModelSelectionStore.current = model
+                self?.tableView.reloadData()
+            }
+            return
+        }
         ModelSelectionStore.current = model
         tableView.reloadData()
     }
 
-    private func promptForMissingKey(model: ModelSelection, key: KeyStore.Key) {
+    // MARK: STT apply
+
+    private func applySTT(_ provider: STTProvider) {
+        guard provider != STTProviderStore.current else { return }
+        if let key = provider.requiredKey, KeyStore.shared.source(for: key) == .missing {
+            promptForMissingKey(label: "\(provider.displayName) STT", key: key) { [weak self] in
+                STTProviderStore.current = provider
+                self?.tableView.reloadData()
+            }
+            return
+        }
+        STTProviderStore.current = provider
+        tableView.reloadData()
+    }
+
+    // MARK: TTS apply
+
+    private func applyTTS(_ provider: TTSProvider) {
+        guard provider != TTSProviderStore.current else { return }
+        if let key = TTSProviderStore.requiredKey(for: provider),
+           KeyStore.shared.source(for: key) == .missing {
+            promptForMissingKey(label: "\(provider.displayName) TTS", key: key) { [weak self] in
+                TTSProviderStore.current = provider
+                self?.tableView.reloadData()
+            }
+            return
+        }
+        TTSProviderStore.current = provider
+        tableView.reloadData()
+    }
+
+    // MARK: Shared "needs key" sheet
+
+    /// Reused by all three segments. The pick gets committed even if the user
+    /// jumps to add the key (so when they pop back, the checkmark already
+    /// reflects their choice) — same UX as the previous Inference-only flow.
+    private func promptForMissingKey(label: String, key: KeyStore.Key, onCommit: @escaping () -> Void) {
         let alert = UIAlertController(
             title: "\(key.displayName) API key required",
-            message: "\(model.displayName) needs an \(key.displayName) API key to work. Add one now to use this model.",
+            message: "\(label) needs a \(key.displayName) API key to work. Add one now to enable this choice.",
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Add Key", style: .default) { [weak self] _ in
             guard let self else { return }
-            // Commit first so when the user finishes adding the key and pops
-            // back, the picker already reflects their choice.
-            self.apply(model)
+            onCommit()
             self.navigationController?.pushViewController(
                 KeyEditVC(focusing: key),
                 animated: true

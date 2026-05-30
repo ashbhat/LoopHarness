@@ -38,11 +38,10 @@ documents — here rather than anywhere else.
 **Code goes through a sub-agent, not the primary chat.**
 If the user asks for code (any language, any size — even a one-line script),
 call `spawn_sub_agent` with `kind: "coding"` and a clear task; do NOT call
-`file_write` / `file_edit` / `file_append` on a code file from the primary
-chat. The file tools listed below are still the right primitives — but a
-coding sub-agent should be the one calling them. The exception is text files
-that aren't code (notes, memory entries, plain documents) — those are fine
-to write inline.
+`file_write` / `file_edit` on a code file from the primary chat. The file
+tools listed below are still the right primitives — but a coding sub-agent
+should be the one calling them. The exception is text files that aren't code
+(notes, memory entries, plain documents) — those are fine to write inline.
 
 Conventions:
 - All paths are relative to the workspace root. No leading "/", no "..".
@@ -53,9 +52,8 @@ Conventions:
 
 Tools:
 - file_read(path) → contents (text) or base64 (binary).
-- file_write(path, content) → create or overwrite. Parents auto-created.
+- file_write(path, content, mode?) → create or overwrite. `mode` defaults to "write"; pass "append" to add to the end of an existing text file (for logs / running memory). Parents auto-created either way.
 - file_edit(path, find, replace) → targeted find/replace inside an existing file.
-- file_append(path, content) → append to end (use for logs / running memory).
 - file_delete(path) → delete a file or empty folder.
 - file_move(from, to) → move or rename.
 - file_list(path?, recursive?) → directory contents with type / size / modified.
@@ -94,12 +92,17 @@ file_write — those are loaded into every system prompt automatically.
             "type": "function",
             "function": [
                 "name": "file_write",
-                "description": "Create or overwrite a file with the given text content. Parent directories are created automatically.",
+                "description": "Create / overwrite / append a text file. Parent directories are created automatically.",
                 "parameters": [
                     "type": "object",
                     "properties": [
                         "path":    ["type": "string", "description": "Relative path from workspace root."],
-                        "content": ["type": "string", "description": "Full file contents."]
+                        "content": ["type": "string", "description": "Text content to write or append."],
+                        "mode": [
+                            "type": "string",
+                            "description": "\"write\" (default) creates / overwrites. \"append\" adds to the end of an existing text file (creates it if missing).",
+                            "enum": ["write", "append"]
+                        ]
                     ],
                     "required": ["path", "content"]
                 ]
@@ -118,21 +121,6 @@ file_write — those are loaded into every system prompt automatically.
                         "replace": ["type": "string", "description": "Replacement text."]
                     ],
                     "required": ["path", "find", "replace"]
-                ]
-            ]
-        ],
-        [
-            "type": "function",
-            "function": [
-                "name": "file_append",
-                "description": "Append text to the end of an existing text file. Creates the file if it doesn't exist.",
-                "parameters": [
-                    "type": "object",
-                    "properties": [
-                        "path":    ["type": "string", "description": "Relative path from workspace root."],
-                        "content": ["type": "string", "description": "Text to append."]
-                    ],
-                    "required": ["path", "content"]
                 ]
             ]
         ],
@@ -231,7 +219,7 @@ file_write — those are loaded into every system prompt automatically.
     ]
 
     static let toolNames: Set<String> = [
-        "file_read", "file_write", "file_edit", "file_append",
+        "file_read", "file_write", "file_edit",
         "file_delete", "file_move", "file_list", "file_search",
         "folder_create", "share_file"
     ]
@@ -247,9 +235,10 @@ file_write — those are loaded into every system prompt automatically.
         let label = path.isEmpty ? "workspace" : path
         switch call.name {
         case "file_read":     return "reading \(label)"
-        case "file_write":    return "writing \(label)"
+        case "file_write":
+            let mode = (call.arguments["mode"] as? String)?.lowercased()
+            return mode == "append" ? "appending to \(label)" : "writing \(label)"
         case "file_edit":     return "editing \(label)"
-        case "file_append":   return "appending to \(label)"
         case "file_delete":   return "deleting \(label)"
         case "file_move":
             if let to = call.arguments["to"] as? String, !to.isEmpty {
@@ -289,9 +278,12 @@ file_write — those are loaded into every system prompt automatically.
             let result: [String: Any]
             switch functionCall.name {
             case "file_read":     result = self.fileRead(functionCall.arguments)
-            case "file_write":    result = self.fileWrite(functionCall.arguments)
+            case "file_write":
+                let mode = (functionCall.arguments["mode"] as? String)?.lowercased()
+                result = mode == "append"
+                    ? self.fileAppend(functionCall.arguments)
+                    : self.fileWrite(functionCall.arguments)
             case "file_edit":     result = self.fileEdit(functionCall.arguments)
-            case "file_append":   result = self.fileAppend(functionCall.arguments)
             case "file_delete":   result = self.fileDelete(functionCall.arguments)
             case "file_move":     result = self.fileMove(functionCall.arguments)
             case "file_list":     result = self.fileList(functionCall.arguments)
@@ -513,7 +505,7 @@ file_write — those are loaded into every system prompt automatically.
             if fm.fileExists(atPath: url.path) {
                 try Workspace.shared.ensureDownloaded(url)
                 if !FileSystemSkill.isTextExtension(url.pathExtension) {
-                    return ["status": "error", "error": "file_append only works on text files"]
+                    return ["status": "error", "error": "file_write mode \"append\" only works on text files"]
                 }
                 existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             }

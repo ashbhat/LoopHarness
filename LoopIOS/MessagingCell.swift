@@ -450,21 +450,21 @@ class MessagingCell: UITableViewCell {
         // Inline image attachment (image_spec) takes a separate code path so
         // we don't need to interleave it with text-bubble layout.
         if let attachment = data.imageAttachment {
-            applyImageAttachment(attachment, modelLabelText: data.model)
+            applyImageAttachment(attachment, modelLabelText: modelText(for: data))
             return
         }
 
         // Inline PDF attachment (pdf_spec). Renders as a card with the
         // page-1 thumbnail + title + page count + Preview/Share buttons.
         if let pdfAttachment = data.pdfAttachment {
-            applyPDFAttachment(pdfAttachment, modelLabelText: data.model)
+            applyPDFAttachment(pdfAttachment, modelLabelText: modelText(for: data))
             return
         }
 
         // Inline map embed — MKMapView with one pin per place. Callouts
         // open Apple Maps for that destination.
         if let mapAttachment = data.mapAttachment {
-            applyMapAttachment(mapAttachment, modelLabelText: data.model)
+            applyMapAttachment(mapAttachment, modelLabelText: modelText(for: data))
             return
         }
 
@@ -560,8 +560,9 @@ class MessagingCell: UITableViewCell {
 //            animatingtextView.text = data.content
             animatingtextView.font = UIFont.preferredFont(forTextStyle: .body)
 
-            baseModelText = data.model
-            modelLabel.text = data.model
+            let byline = modelText(for: data)
+            baseModelText = byline
+            modelLabel.text = byline
             modelLabel.textColor = .secondaryLabel
             modelLabel.font = UIFont.preferredFont(forTextStyle: .caption2)
             modelLabel.numberOfLines = 1
@@ -570,13 +571,13 @@ class MessagingCell: UITableViewCell {
             ttsIndicator.stopAnimating()
             ttsIndicator.isHidden = true
 
-            // Disable typing animation for better scroll performance
-            if shouldAnimate {
-                animateText(content: data.content)
-            } else {
-                textView.alpha = 1.0
-                animatingtextView.attributedText = self.attributedString(from: data.content)
-            }
+            // Render the full message immediately. The old per-word typewriter
+            // animation (`animateText`) caused highly variable perceived speed
+            // (short replies = instant, long replies = multi-second crawl) plus
+            // quadratic regex cost and per-tick tableView layout thrash.
+            // See docs/streaming-investigation.md for the full analysis.
+            textView.alpha = 1.0
+            animatingtextView.attributedText = self.attributedString(from: data.content)
             
             // Update content size after setting text
             // updateContentSize() // Disabled for better scroll performance
@@ -651,70 +652,7 @@ class MessagingCell: UITableViewCell {
         }
     }
 
-    private func animateText(content: String) {
-        animatingtextView.text = "" // Start with an empty string
-        let words = content.split(separator: " ") // Split content into words
-        var currentIndex = 0
-        
-        // Invalidate any previous timer before starting a new one
-        timer?.invalidate()
-        
-        
-        let impactGenerator = UIImpactFeedbackGenerator(style: .light, view: self.textView)
-//        impactGenerator.prepare()
-        // Run a timer on a background queue to minimize UI thread congestion
-        
-        var textCache: String = ""
-        timer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { [weak self] timer in
-            guard let self = self else {
-                timer.invalidate()
-                return
-            }
-            
-            if currentIndex < words.count {
-                let word = words[currentIndex]
-                
-                let newText = (textCache) + (self.animatingtextView.text?.isEmpty ?? true ? "" : " ") + word
-                textCache = newText
-                currentIndex += 1
-                
-                // Batch UI updates to main thread for smoother rendering
-                DispatchQueue.main.async {
-                    self.animatingtextView.attributedText = self.attributedString(from: newText)
-//                    impactGenerator.impactOccurred()
-                    
-                    // Update content size during animation
-                    self.updateContentSize()
-                }
-            } else {
-                timer.invalidate()
-            }
-        }
-        
-        // Ensure the timer runs in the common run loop mode to prevent interruptions
-        RunLoop.main.add(timer!, forMode: .common)
-    }
-    
-    private func updateContentSize() {
-        // Force layout update to ensure proper content size calculation
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            
-            // Ensure text views have proper content size
-            self.textView.invalidateIntrinsicContentSize()
-            self.animatingtextView.invalidateIntrinsicContentSize()
-            
-            // Force layout update
-            self.contentView.setNeedsLayout()
-            self.contentView.layoutIfNeeded()
-            
-            // Update table view cell height if needed
-            if let tableView = self.superview as? UITableView {
-                tableView.beginUpdates()
-                tableView.endUpdates()
-            }
-        }
-    }
+
     
     override func systemLayoutSizeFitting(_ targetSize: CGSize, withHorizontalFittingPriority horizontalFittingPriority: UILayoutPriority, verticalFittingPriority: UILayoutPriority) -> CGSize {
         // Force layout to get accurate size
@@ -751,6 +689,18 @@ class MessagingCell: UITableViewCell {
         // expanded AgentView transcript share a single source of truth for
         // markdown styling.
         return MarkdownAttributedString.render(text)
+    }
+
+    /// Build the model-label base text, appending "| Context X%" when token
+    /// usage data and a known context window size are both available.
+    private func modelText(for data: MessageStruct) -> String {
+        var text = data.model
+        if let usage = data.tokenUsage,
+           let window = ModelSelection.contextWindowSize(forStamp: data.model),
+           let pct = usage.contextPercent(windowSize: window) {
+            text += " | Context \(pct)%"
+        }
+        return text
     }
 
 
@@ -825,8 +775,9 @@ class MessagingCell: UITableViewCell {
         ]
         NSLayoutConstraint.activate(modelLabelConstraints)
 
-        baseModelText = data.model
-        modelLabel.text = data.model
+        let byline = modelText(for: data)
+        baseModelText = byline
+        modelLabel.text = byline
         modelLabel.textColor = .secondaryLabel
         modelLabel.font = UIFont.preferredFont(forTextStyle: .caption2)
         modelLabel.numberOfLines = 1

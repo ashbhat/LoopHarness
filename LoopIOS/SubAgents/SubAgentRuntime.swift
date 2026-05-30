@@ -252,9 +252,10 @@ enum SubAgentRuntime {
             nothing, or the user explicitly asked you to do it
             yourself), fall back to:
             - Terminal commands directly (git, npm, pytest, etc.) plus
-            - file_list / file_search / file_read / file_write /
-              file_edit / file_append for code changes. Workspace-
-              relative paths only; 1 MB per-file cap on file_read.
+            - file_list / file_search / file_read / file_write
+              (mode "write" or "append") / file_edit for code
+              changes. Workspace-relative paths only; 1 MB per-file
+              cap on file_read.
             - git_clone / git_status / git_pull for repos under
               `repos/<name>`.
 
@@ -390,6 +391,7 @@ enum SubAgentRuntime {
         if let s = SpecBuilderSkill.shared.statusText(for: call) { return s }
         if let s = ObsidianSkill.shared.statusText(for: call) { return s }
         if let s = CalendarSkill.shared.statusText(for: call) { return s }
+        if let s = SSHSkill.shared.statusText(for: call) { return s }
         return nil
     }
 

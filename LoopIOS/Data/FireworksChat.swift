@@ -1,28 +1,27 @@
 //
-//  KimiChat.swift
+//  FireworksChat.swift
 //  Loop
 //
-//  Direct client-side Moonshot/Kimi path. Used by AgentHarness when the
-//  selected model's provider is `.kimi` and the user has a KIMI_API_KEY set
-//  in the Keys panel (or bundled via Secrets.xcconfig). Talks straight to
-//  api.moonshot.ai/v1/chat/completions with the user's own key — no backend.
+//  Direct client-side Fireworks inference path. Used by AgentHarness when
+//  the selected model's provider is `.fireworks` and the user has a
+//  FIREWORKS_API_KEY set in the Keys panel (or bundled via
+//  Secrets.xcconfig). Talks straight to
+//  api.fireworks.ai/inference/v1/chat/completions with the user's own key.
 //
 //  Wire format is OpenAI-compatible: same `messages` shape, same
 //  `{type:"function", function:{…}}` tool schemas, same `tool_calls` ↔
 //  `role:"tool"` + `tool_call_id` pairing. So this client delegates message
 //  mapping and tool-call sanitisation to `OpenAIChat` and only differs in:
-//    • endpoint (api.moonshot.ai instead of api.openai.com)
-//    • model id default (kimi-k2.6)
-//    • token cap parameter name (`max_completion_tokens`, per Kimi docs —
-//      `max_tokens` is deprecated on Kimi K2.6)
-//    • error domain so a failure surfaces as "Kimi API error: …" not OpenAI.
+//    • endpoint (api.fireworks.ai instead of api.openai.com)
+//    • model id (accounts/fireworks/models/kimi-k2p6)
+//    • error domain so a failure surfaces as "Fireworks API error: …"
 //
 
 import Foundation
 
-final class KimiChat {
+final class FireworksChat {
 
-    static let shared = KimiChat()
+    static let shared = FireworksChat()
     private init() {}
 
     private lazy var session: URLSession = {
@@ -33,24 +32,22 @@ final class KimiChat {
         return URLSession(configuration: config)
     }()
 
-    private let endpoint = URL(string: "https://api.moonshot.ai/v1/chat/completions")!
+    private let endpoint = URL(string: "https://api.fireworks.ai/inference/v1/chat/completions")!
 
-    /// Generous cap so long agent turns (multiple tool calls, recap, follow-up
-    /// prose) aren't truncated; Kimi K2.6 happily streams much more if asked.
     private let maxCompletionTokens = 4096
 
     func chat(messages: [MessageStruct],
               tools: [[String: Any]]? = nil,
               completion: @escaping (MessageStruct?, Error?) -> Void) {
 
-        guard let apiKey = KeyStore.shared.value(for: .kimi),
+        guard let apiKey = KeyStore.shared.value(for: .fireworks),
               !apiKey.isEmpty else {
             completion(nil, Self.error(
-                "Kimi K2.6 is selected but no Kimi key is set. Add KIMI_API_KEY in Settings ▸ Keys, or switch the model in Settings ▸ Model."))
+                "Fireworks is selected but no Fireworks key is set. Add FIREWORKS_API_KEY in Settings ▸ Keys, or switch the model in Settings ▸ Model."))
             return
         }
 
-        let modelID = ModelSelectionStore.current.apiModelID ?? "kimi-k2.6"
+        let modelID = ModelSelectionStore.current.apiModelID ?? "accounts/fireworks/models/kimi-k2p6"
 
         var body: [String: Any] = [
             "model": modelID,
@@ -63,7 +60,7 @@ final class KimiChat {
         }
 
         guard let payload = try? JSONSerialization.data(withJSONObject: body) else {
-            completion(nil, Self.error("Failed to encode the Kimi request body."))
+            completion(nil, Self.error("Failed to encode the Fireworks request body."))
             return
         }
 
@@ -74,29 +71,26 @@ final class KimiChat {
         req.httpBody = payload
         req.timeoutInterval = 120
 
-        print("KimiChat: POST \(endpoint) model=\(modelID) tools=\((tools ?? []).count)")
+        print("FireworksChat: POST \(endpoint) model=\(modelID) tools=\((tools ?? []).count)")
         let task = session.dataTask(with: req) { data, response, error in
             if let error = error {
-                completion(nil, Self.error("Network error talking to Kimi: \(error.localizedDescription)"))
+                completion(nil, Self.error("Network error talking to Fireworks: \(error.localizedDescription)"))
                 return
             }
             if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
                 let bodyStr = data.flatMap { String(data: $0, encoding: .utf8) } ?? "<no body>"
                 let detail = Self.errorDetail(from: bodyStr) ?? "HTTP \(http.statusCode)"
-                completion(nil, Self.error("Kimi API error: \(detail)"))
+                completion(nil, Self.error("Fireworks API error: \(detail)"))
                 return
             }
             guard let data = data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let choices = json["choices"] as? [[String: Any]],
                   let message = choices.first?["message"] as? [String: Any] else {
-                completion(nil, Self.error("Kimi returned an unexpected payload."))
+                completion(nil, Self.error("Fireworks returned an unexpected payload."))
                 return
             }
 
-            // Same tool_calls shape as OpenAI: an array on the assistant turn,
-            // each entry carrying its own id so the matching `role:"tool"`
-            // reply can pair back via `tool_call_id` on the next user turn.
             let calls: [FunctionCallStruct]
             if let toolCalls = message["tool_calls"] as? [[String: Any]] {
                 calls = toolCalls.compactMap { entry in
@@ -116,12 +110,22 @@ final class KimiChat {
             }
             let content = (message["content"] as? String) ?? ""
             let reasoning = message["reasoning_content"] as? String
+            var usage: TokenUsage? = nil
+            if let u = json["usage"] as? [String: Any],
+               let prompt = u["prompt_tokens"] as? Int,
+               let comp = u["completion_tokens"] as? Int,
+               let total = u["total_tokens"] as? Int {
+                usage = TokenUsage(promptTokens: prompt,
+                                   completionTokens: comp,
+                                   totalTokens: total)
+            }
             let msg = MessageStruct(
                 role: "assistant",
                 content: content,
                 model: ModelSelectionStore.current.stampedMessageModel,
                 functions: calls,
-                reasoningContent: reasoning)
+                reasoningContent: reasoning,
+                tokenUsage: usage)
             completion(msg, nil)
         }
         task.resume()
@@ -130,12 +134,10 @@ final class KimiChat {
     // MARK: - Errors
 
     private static func error(_ message: String) -> NSError {
-        NSError(domain: "KimiChat", code: -1,
+        NSError(domain: "FireworksChat", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: message])
     }
 
-    /// Pulls `error.message` (or `error.code`/`message`) out of a Moonshot
-    /// error body. Same envelope shape OpenAI uses.
     private static func errorDetail(from bodyStr: String) -> String? {
         guard let data = bodyStr.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {

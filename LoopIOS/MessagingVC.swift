@@ -64,71 +64,9 @@ enum SpeechSpeed: String, CaseIterable {
     }
 }
 
-/// Streaming-TTS provider used for assistant audio. Change `active` and
-/// rebuild to swap providers; each case has its own API-key Info.plist slot
-/// and falls through to AVSpeechSynthesizer if the key is missing or the
-/// request fails.
-enum TTSProvider: String, CaseIterable {
-    case aura2              = "aura2"              // Deepgram Aura-2 — fastest, flat prosody
-    case elevenLabsV3       = "elevenLabsV3"       // ElevenLabs Eleven v3 — most expressive, ~600ms-1s TTFB
-    case elevenLabsFlashV25 = "elevenLabsFlashV25" // ElevenLabs Flash v2.5 — low-latency (~75ms model TTFB), less expressive than v3
-    case openAIMiniTTS      = "openAIMiniTTS"      // OpenAI gpt-4o-mini-tts — steerable via instructions
-    case system             = "system"             // On-device AVSpeechSynthesizer (no network)
-
-    /// Human-readable name shown in the speaker menu.
-    var displayName: String {
-        switch self {
-        case .aura2:              return "Deepgram Aura-2"
-        case .elevenLabsV3:       return "ElevenLabs v3"
-        case .elevenLabsFlashV25: return "ElevenLabs Flash v2.5"
-        case .openAIMiniTTS:      return "OpenAI gpt-4o-mini-tts"
-        case .system:             return "On-device (offline)"
-        }
-    }
-
-    /// Voice identifiers the user can pick for this provider, alongside a
-    /// human label. For the `.system` case, voices come from
-    /// AVSpeechSynthesisVoice.speechVoices() at runtime — handled separately.
-    var voiceOptions: [(label: String, id: String)] {
-        switch self {
-        case .aura2:
-            return [
-                ("Thalia (warm female)",   "aura-2-thalia-en"),
-                ("Asteria (calm female)",  "aura-2-asteria-en"),
-                ("Luna (soft female)",     "aura-2-luna-en"),
-                ("Helios (deep male)",     "aura-2-helios-en"),
-                ("Orion (clear male)",     "aura-2-orion-en"),
-                ("Arcas (narrative male)", "aura-2-arcas-en")
-            ]
-        case .elevenLabsV3, .elevenLabsFlashV25:
-            return [
-                ("Rachel (warm female)",  "21m00Tcm4TlvDq8ikWAM"),
-                ("Bella (young female)",  "EXAVITQu4vr4xnSDxMaL"),
-                ("Adam (deep male)",      "pNInz6obpgDQGcFmaJgB"),
-                ("Antoni (calm male)",    "ErXwobaYiN019PkySvjV"),
-                ("Elli (soft female)",    "MF3mGyEYCl7XYWbV9V6O"),
-                ("Josh (steady male)",    "TxGEqnHWrfWFTfGW9XjX")
-            ]
-        case .openAIMiniTTS:
-            return ["alloy", "echo", "fable", "onyx", "nova",
-                    "shimmer", "coral", "sage", "ash", "ballad", "verse"]
-                .map { ($0.capitalized, $0) }
-        case .system:
-            return []
-        }
-    }
-
-    /// Voice id used when the user hasn't picked one for this provider yet.
-    var defaultVoiceId: String {
-        switch self {
-        case .aura2:              return "aura-2-thalia-en"
-        case .elevenLabsV3:       return "21m00Tcm4TlvDq8ikWAM"
-        case .elevenLabsFlashV25: return "21m00Tcm4TlvDq8ikWAM"
-        case .openAIMiniTTS:      return "shimmer"
-        case .system:             return ""
-        }
-    }
-}
+// TTSProvider has moved to LoopIOS/Data/SpeechProvider.swift so the macOS
+// and visionOS targets (which exclude MessagingVC.swift) can read the same
+// enum from STT/TTS settings code that's shared across all targets.
 
 class MessagingVC: UIViewController {
 
@@ -148,6 +86,15 @@ class MessagingVC: UIViewController {
     var bottomConstraint: NSLayoutConstraint?
     
     var messageIdToAnimate: String?
+
+    /// Light tap fired when the user commits a message — a soft button-press
+    /// confirmation. Kept lazy so we don't spin the haptic engine for users
+    /// who never send (cold-launched into a transcript they only read).
+    private lazy var sendHapticGenerator = UIImpactFeedbackGenerator(style: .light)
+    /// Softer tap when the assistant's reply first lands — distinct from the
+    /// send haptic (lighter, gentler) so the two events feel like different
+    /// "sides" of the conversation rather than two identical bumps.
+    private lazy var responseHapticGenerator = UIImpactFeedbackGenerator(style: .soft)
     
     var base_system_prompt = """
 You are Loop, a personal AI agent and living memory that runs on the user's iPhone and Mac. You remember what the user tells you across conversations and devices, and you act on their behalf through your skills.
@@ -163,6 +110,8 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
 \(SchedulerSkill.systemPromptFragment)
 
 \(ExaSkill.systemPromptFragment)
+
+\(MuniRealtimeSkill.systemPromptFragment)
 """
     
     var default_message: String = "Hello!"
@@ -247,16 +196,14 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
         }
     }
 
-    /// User-selected TTS provider. Persisted across launches; defaults to
-    /// OpenAI gpt-4o-mini-tts. The setter rebuilds the speaker menu so the
-    /// voice submenu updates to the new provider's voice list.
+    /// User-selected TTS provider. Persisted across launches via
+    /// `TTSProviderStore` so the speaker menu and Settings ▸ Model write
+    /// the same iCloud-KVS key. The setter rebuilds the speaker menu so
+    /// the voice submenu updates to the new provider's voice list.
     private var ttsProvider: TTSProvider {
-        get {
-            let raw = iCloudKVSDefaults.shared.string(forKey: "ttsProvider") ?? TTSProvider.openAIMiniTTS.rawValue
-            return TTSProvider(rawValue: raw) ?? .openAIMiniTTS
-        }
+        get { TTSProviderStore.current }
         set {
-            iCloudKVSDefaults.shared.set(newValue.rawValue, forKey: "ttsProvider")
+            TTSProviderStore.current = newValue
             muteButton?.menu = buildSpeakerMenu()
         }
     }
@@ -320,6 +267,12 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
         }
     }
     
+    /// Conversation id captured when the latest LLM request was dispatched.
+    /// Responses arriving after the user has switched away are persisted to
+    /// this conversation (via the store) but NOT appended to the in-memory
+    /// `messages` array, keeping the on-screen table clean.
+    private var activeRequestConversationId: String?
+
     lazy var messages: [MessageStruct] = [
         MessageStruct(role: "system", content: base_system_prompt),
     ]
@@ -345,8 +298,15 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
     /// any onboarding-flow turns — those are scripted UI, not part of the
     /// real conversation, and should not leak into the model's context on the
     /// first real message the user sends.
+    ///
+    /// When a compaction summary file exists for the current conversation,
+    /// the returned array is the compacted form: system messages + summary +
+    /// last N messages. The UI (`visible_messages`) continues to show the
+    /// full history.
     var chatContextMessages: [MessageStruct] {
-        return self.messages.filter { $0.onboardingCard == nil }
+        let filtered = self.messages.filter { $0.onboardingCard == nil }
+        guard let convId = currentConversationEntity?.id else { return filtered }
+        return ContextCompactor.compactedMessages(all: filtered, conversationId: convId)
     }
     
     override func viewDidLoad() {
@@ -460,6 +420,28 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
             self,
             selector: #selector(handleSubAgentMessage(_:)),
             name: .devinAgentDidPostMessage,
+            object: nil
+        )
+
+        // Settings ▸ Model writes to TTSProviderStore from outside our setter.
+        // Rebuild the speaker menu so the checkmark + voice submenu reflect
+        // the new pick without waiting for the user to reopen this VC.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTTSProviderChanged),
+            name: .ttsProviderChanged,
+            object: nil
+        )
+
+        // Cover writers that go through iCloudKVSDefaults directly (e.g. the
+        // OnboardingCoordinator's voice-step writes to `audioMuted` and
+        // `ttsProvider`) — without this, picking a voice during onboarding
+        // updates the persisted state but leaves the nav-bar speaker button
+        // showing its old icon/menu, which then mis-toggles on first tap.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleKVSDefaultsChanged(_:)),
+            name: iCloudKVSDefaults.didChangeNotification,
             object: nil
         )
 
@@ -607,8 +589,10 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
     func loadConversation(_ conversation: SimpleConversation) {
         currentConversationEntity = conversation
         conversationManager.currentConversation = conversation
-        // Clear TTS timing state so a stale "| 2.03s to audio" suffix doesn't
-        // ride along onto a different conversation's messages by id collision.
+        // Reset the in-flight request scope so responses from a previous
+        // conversation's request don't bleed into this one's in-memory table.
+        activeRequestConversationId = nil
+        ai_state = .None
         ttsStatuses.removeAll()
         ttsStartTimes.removeAll()
         loadMessagesFromConversation(conversation)
@@ -633,6 +617,7 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
         let newConversation = conversationManager.createConversation(title: "New Chat \(timestamp)")
         currentConversationEntity = newConversation
         conversationManager.currentConversation = newConversation
+        activeRequestConversationId = nil
         ttsStatuses.removeAll()
         ttsStartTimes.removeAll()
         loadDefaultMessage()
@@ -681,6 +666,28 @@ When the user asks how you work, what you can do, or how you're built, read `ABO
         // Add a small delay to ensure the view is fully loaded
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             self.toggleVoiceTranscription()
+        }
+    }
+
+    /// Posted by TTSProviderStore when Settings ▸ Model picks a new provider.
+    /// We rebuild the speaker menu directly rather than rerouting through the
+    /// `ttsProvider` setter (which would also re-post the same notification
+    /// and create a feedback loop).
+    @objc private func handleTTSProviderChanged() {
+        DispatchQueue.main.async { [weak self] in
+            self?.muteButton?.menu = self?.buildSpeakerMenu()
+        }
+    }
+
+    /// Posted by `iCloudKVSDefaults` on every local write (and on KVS-external
+    /// mirroring). Filter on the keys that affect the nav-bar speaker button
+    /// — `audioMuted` flips the icon + menu wording, `ttsProvider` changes the
+    /// active row in the Voice submenu. Anything else is irrelevant here.
+    @objc private func handleKVSDefaultsChanged(_ note: Notification) {
+        let keys = (note.userInfo?["keys"] as? [String]) ?? []
+        guard keys.contains("audioMuted") || keys.contains("ttsProvider") else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.updateMuteButtonAppearance()
         }
     }
 
@@ -853,31 +860,36 @@ extension MessagingVC: AgentLargeViewVoiceDelegate {
 extension MessagingVC: MessageBoxDelegate {
     
     func didSendMessageStruct(_ message: MessageStruct) {
-        // Ensure we have a current conversation
-        let conversation = ensureCurrentConversation()
+        // Use the conversation the in-flight request belongs to, falling
+        // back to the currently visible conversation.
+        let requestConvId = activeRequestConversationId ?? currentConversationEntity?.id
+        let conversation: SimpleConversation
+        if let id = requestConvId, let target = conversationManager.getConversation(by: id) {
+            conversation = target
+        } else {
+            conversation = ensureCurrentConversation()
+        }
 
-        // Add message to conversation
         conversationManager.addMessage(message, to: conversation)
 
-        // Update local conversation reference
-        currentConversationEntity = conversationManager.currentConversation
+        let isStillViewing = currentConversationEntity?.id == conversation.id
+        if isStillViewing {
+            currentConversationEntity = conversationManager.currentConversation
+            self.messages.append(message)
+            self.newMessageSent()
+        }
 
-        // Add to local messages array
-        self.messages.append(message)
-        self.newMessageSent()
-
-        // Tool just finished — flip the shimmer back to a generic "thinking"
-        // copy while the model decides what to do with the result.
         self.ai_state = .defaultThinking
         VoiceLoopCoordinator.shared.setState(.thinking)
         DispatchQueue.main.async {
-            self.tableView.reloadData()
+            if isStillViewing { self.tableView.reloadData() }
         }
 
+        let reqConvId = conversation.id
         Cloud.connection.chat(messages: self.chatContextMessages) { responseMessage, error in
             self.ai_state = .None
             if let responseMessage = responseMessage {
-                self.processMessage(message: responseMessage)
+                self.processMessage(message: responseMessage, requestConversationId: reqConvId)
             }
             else {
                 if #available(iOS 26.0, *) {
@@ -892,19 +904,21 @@ extension MessagingVC: MessageBoxDelegate {
                                 let response = try await session.respond(to: singlePrompt)
                                 let responseMessage = MessageStruct(role: "assistant", content: response.content, model: "Apple LLM")
 
-                                self.messages.append(responseMessage)
-                                self.messageIdToAnimate = responseMessage.id
-
-                                // Save error message to conversation
-                                self.conversationManager.addMessage(responseMessage, to: conversation)
+                                if let target = self.conversationManager.getConversation(by: reqConvId) {
+                                    self.conversationManager.addMessage(responseMessage, to: target)
+                                }
+                                let viewing = self.currentConversationEntity?.id == reqConvId
+                                if viewing {
+                                    self.messages.append(responseMessage)
+                                    self.messageIdToAnimate = responseMessage.id
+                                }
 
                                 DispatchQueue.main.async {
-                                    self.tableView.reloadData()
-                                    self.scrollToLastMessage()
-                                    // Without this the offline reply lands in
-                                    // the table silently — playMessageSynthesizer
-                                    // is what routes to speakOffline on no-net.
-                                    self.playMessageSynthesizer(message: responseMessage)
+                                    if viewing {
+                                        self.tableView.reloadData()
+                                        self.scrollToLastMessage()
+                                        self.playMessageSynthesizer(message: responseMessage)
+                                    }
                                 }
 
                             }
@@ -916,16 +930,23 @@ extension MessagingVC: MessageBoxDelegate {
                 }
 
 
-                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – I'm having trouble connecting to Gemini. Please try again.")
-                self.messages.append(errorMessage)
-                self.messageIdToAnimate = errorMessage.id
-
-                // Save error message to conversation
-                self.conversationManager.addMessage(errorMessage, to: conversation)
+                let modelName = ModelSelectionStore.current.displayName
+                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – \(modelName) didn't respond. You can try again or switch models in Settings ▸ Model.")
+                ActiveRequestTracker.shared.markIdle(reqConvId)
+                if let target = self.conversationManager.getConversation(by: reqConvId) {
+                    self.conversationManager.addMessage(errorMessage, to: target)
+                }
+                let viewing = self.currentConversationEntity?.id == reqConvId
+                if viewing {
+                    self.messages.append(errorMessage)
+                    self.messageIdToAnimate = errorMessage.id
+                }
 
                 DispatchQueue.main.async {
-                    self.tableView.reloadData()
-                    self.scrollToLastMessage()
+                    if viewing {
+                        self.tableView.reloadData()
+                        self.scrollToLastMessage()
+                    }
                 }
                 EarconPlayer.shared.play(.error)
                 VoiceLoopCoordinator.shared.setState(.idle)
@@ -934,6 +955,10 @@ extension MessagingVC: MessageBoxDelegate {
     }
 
     func didSendMessageText(_ message: String) {
+        // Cancel any in-flight TTS immediately — the user just sent a new
+        // message, so continuing to speak the previous response is stale.
+        stopSpeaking()
+
         // Mid-onboarding text input goes to the coordinator first. If it
         // consumes the message (echoes a bubble, advances the script, or
         // re-posts the current step), short-circuit before the regular
@@ -948,6 +973,7 @@ extension MessagingVC: MessageBoxDelegate {
         // Visual punctuation: the user just sent something. Pulses the
         // avatar(s) via MainVC's subscription on the coordinator.
         VoiceLoopCoordinator.shared.publishAcknowledgePulse()
+        sendHapticGenerator.impactOccurred()
 
         // Pull any staged file attachment off the input bar; the send button
         // is active even with empty text if there's a file ready, so we
@@ -981,10 +1007,31 @@ extension MessagingVC: MessageBoxDelegate {
         })
 
 
+        // Capture the conversation id at request time so async callbacks
+        // route responses to the correct conversation even if the user
+        // switches away before the response arrives.
+        let requestConversationId = conversation.id
+        self.activeRequestConversationId = requestConversationId
+        ActiveRequestTracker.shared.markActive(requestConversationId)
+
+        // Opportunistic context compaction: check thresholds and spawn a
+        // background sub-agent if the context is large enough. The trigger
+        // level is captured so we can append a brief notice to the
+        // assistant's reply when the hard threshold is crossed.
+        let compactionTrigger = ContextCompactor.checkAndTrigger(
+            messages: self.chatContextMessages,
+            conversationId: requestConversationId
+        )
+
         Cloud.connection.chat(messages: self.chatContextMessages) { responseMessage, error in
             self.ai_state = .None
-            if let responseMessage = responseMessage {
-                self.processMessage(message: responseMessage)
+            if var responseMessage = responseMessage {
+                // Hard-trigger notice: append a one-liner so the user knows
+                // compaction is running in the background.
+                if compactionTrigger == .hard {
+                    responseMessage.content += "\n\n(compacting context in the background)"
+                }
+                self.processMessage(message: responseMessage, requestConversationId: requestConversationId)
             }
             else {
 
@@ -1000,21 +1047,29 @@ extension MessagingVC: MessageBoxDelegate {
                                 print(singlePrompt)
                                 let response = try await session.respond(to: singlePrompt)
                                 print(response)
-                                let responseMessage = MessageStruct(role: "assistant", content: response.content, model: "Apple LLM")
+                                var responseMessage = MessageStruct(role: "assistant", content: response.content, model: "Apple LLM")
+                                if compactionTrigger == .hard {
+                                    responseMessage.content += "\n\n(compacting context in the background)"
+                                }
 
-                                self.messages.append(responseMessage)
-                                self.messageIdToAnimate = responseMessage.id
+                                // Persist to the conversation the request originated from
+                                if let target = self.conversationManager.getConversation(by: requestConversationId) {
+                                    self.conversationManager.addMessage(responseMessage, to: target)
+                                }
 
-                                // Save error message to conversation
-                                self.conversationManager.addMessage(responseMessage, to: conversation)
+                                // Only update the in-memory table if we're still viewing that conversation
+                                let isStillViewing = self.currentConversationEntity?.id == requestConversationId
+                                if isStillViewing {
+                                    self.messages.append(responseMessage)
+                                    self.messageIdToAnimate = responseMessage.id
+                                }
 
                                 DispatchQueue.main.async {
-                                    self.tableView.reloadData()
-                                    self.scrollToLastMessage()
-                                    // Without this the offline reply lands in
-                                    // the table silently — playMessageSynthesizer
-                                    // is what routes to speakOffline on no-net.
-                                    self.playMessageSynthesizer(message: responseMessage)
+                                    if isStillViewing {
+                                        self.tableView.reloadData()
+                                        self.scrollToLastMessage()
+                                        self.playMessageSynthesizer(message: responseMessage)
+                                    }
                                 }
 
                             }
@@ -1026,16 +1081,26 @@ extension MessagingVC: MessageBoxDelegate {
                 }
                 
                 
-                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – I'm having trouble connecting to Gemini. Please try again.")
-                self.messages.append(errorMessage)
-                self.messageIdToAnimate = errorMessage.id
+                let modelName = ModelSelectionStore.current.displayName
+                let errorMessage = MessageStruct(role: "assistant", content: "Sorry – \(modelName) didn't respond. You can try again or switch models in Settings ▸ Model.")
+                ActiveRequestTracker.shared.markIdle(requestConversationId)
 
-                // Save error message to conversation
-                self.conversationManager.addMessage(errorMessage, to: conversation)
+                // Persist to the originating conversation
+                if let target = self.conversationManager.getConversation(by: requestConversationId) {
+                    self.conversationManager.addMessage(errorMessage, to: target)
+                }
+
+                let isStillViewing = self.currentConversationEntity?.id == requestConversationId
+                if isStillViewing {
+                    self.messages.append(errorMessage)
+                    self.messageIdToAnimate = errorMessage.id
+                }
 
                 DispatchQueue.main.async {
-                    self.tableView.reloadData()
-                    self.scrollToLastMessage()
+                    if isStillViewing {
+                        self.tableView.reloadData()
+                        self.scrollToLastMessage()
+                    }
                 }
                 EarconPlayer.shared.play(.error)
                 VoiceLoopCoordinator.shared.setState(.idle)
@@ -1067,6 +1132,8 @@ extension MessagingVC: MessageBoxDelegate {
         if let s = DevinSkill.shared.statusText(for: call) { return s }
         if let s = NavigationSkill.shared.statusText(for: call) { return s }
         if let s = TwitterSkill.shared.statusText(for: call) { return s }
+        if let s = SSHSkill.shared.statusText(for: call) { return s }
+        if let s = MuniRealtimeSkill.shared.statusText(for: call) { return s }
         #if canImport(HealthKit) && os(iOS)
         if let s = HealthSkill.shared.statusText(for: call) { return s }
         #endif
@@ -1083,51 +1150,57 @@ extension MessagingVC: MessageBoxDelegate {
         }
     }
 
-    func processMessage(message: MessageStruct) {
+    func processMessage(message: MessageStruct, requestConversationId: String? = nil) {
+        let targetConvId = requestConversationId ?? activeRequestConversationId ?? currentConversationEntity?.id
 
         if message.role == "function" {
-            // Single-result entry point. The multi-call path below batches
-            // its own results, then re-enters chat directly, so it never
-            // round-trips through this branch.
             self.didSendMessageStruct(message)
             return
         }
 
+        let isViewing = currentConversationEntity?.id == targetConvId
+
         if message.functions.isEmpty {
-            // Plain assistant turn — no tool calls. Render normally; if the
-            // model returned an empty turn after a tool sequence (which can
-            // happen when it has nothing left to say), unwind the shimmer
-            // instead of dropping the user into a forever-spinning state.
+            // Terminal assistant response — mark the conversation idle.
+            if let id = targetConvId {
+                ActiveRequestTracker.shared.markIdle(id)
+            }
             guard message.content.count > 0 else {
                 self.ai_state = .None
                 VoiceLoopCoordinator.shared.setState(.idle)
                 DispatchQueue.main.async { self.tableView.reloadData() }
                 return
             }
-            let conversation = ensureCurrentConversation()
-            conversationManager.addMessage(message, to: conversation)
-            currentConversationEntity = conversationManager.currentConversation
-            self.messages.append(message)
-            // Publish the assistant turn to the activity log so the expanded
-            // AgentView can render it as a readable transcript below the orb.
-            // We publish here (not inside playMessageSynthesizer) because TTS
-            // is skippable — when the user has voice muted, the orb should
-            // still surface the text.
-            AgentActivityLog.shared.setAssistantTranscript(message.content)
-            VoiceLoopCoordinator.shared.publishAcknowledgePulse()
-            self.playMessageSynthesizer(message: message)
-            self.messageIdToAnimate = message.id
-            DispatchQueue.main.async {
-                self.tableView.reloadData()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: {
-                    self.scrollToLastMessage()
-                })
+
+            // Persist to the originating conversation
+            let conversation: SimpleConversation
+            if let id = targetConvId, let target = conversationManager.getConversation(by: id) {
+                conversation = target
+            } else {
+                conversation = ensureCurrentConversation()
             }
-            // Fire-and-forget title generation. Safe to call on every
-            // assistant turn — the service dedupes per conversation id,
-            // skips chats that already have a real title, and waits for a
-            // real user-and-assistant exchange (onboarding turns don't
-            // count) before actually firing.
+            conversationManager.addMessage(message, to: conversation)
+
+            if isViewing {
+                currentConversationEntity = conversationManager.currentConversation
+                self.messages.append(message)
+                AgentActivityLog.shared.setAssistantTranscript(message.content)
+                VoiceLoopCoordinator.shared.publishAcknowledgePulse()
+                self.playMessageSynthesizer(message: message)
+                self.messageIdToAnimate = message.id
+                DispatchQueue.main.async {
+                    // Haptic hops to main with the reload so it fires right
+                    // as the bubble appears — and so UIFeedbackGenerator's
+                    // main-thread requirement is honored when processMessage
+                    // is invoked from URLSession's delegate queue.
+                    self.responseHapticGenerator.impactOccurred()
+                    self.tableView.reloadData()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: {
+                        self.scrollToLastMessage()
+                    })
+                }
+            }
+
             if let refreshed = conversationManager.getConversation(by: conversation.id) {
                 ConversationTitleService.shared.generateIfNeeded(
                     for: refreshed,
@@ -1137,17 +1210,15 @@ extension MessagingVC: MessageBoxDelegate {
             return
         }
 
-        // Assistant emitted ≥1 tool call(s). Update the shimmer for the first
-        // call so the UI flips before any tool starts running, then hand off
-        // to dispatchAllCalls which logs each call individually as it begins
-        // (so the expanded AgentView caption tracks every parallel tool, not
-        // just the first one in the batch).
+        // Assistant emitted ≥1 tool call(s).
         if let firstCall = message.functions.first {
             self.ai_state = .Thinking(text: self.statusText(for: firstCall))
         }
-        self.messages.append(message)
-        DispatchQueue.main.async { self.tableView.reloadData() }
-        self.dispatchAllCalls(in: message)
+        if isViewing {
+            self.messages.append(message)
+            DispatchQueue.main.async { self.tableView.reloadData() }
+        }
+        self.dispatchAllCalls(in: message, requestConversationId: targetConvId)
     }
 
     /// Fan out every call on an assistant turn. Anthropic and OpenAI both
@@ -1156,15 +1227,13 @@ extension MessagingVC: MessageBoxDelegate {
     /// what unlocks multi-step plans ("create note, move it, post link").
     /// Previously the harness only serviced the first call and silently
     /// dropped the rest, stalling the loop after one tool.
-    private func dispatchAllCalls(in message: MessageStruct) {
+    private func dispatchAllCalls(in message: MessageStruct, requestConversationId: String? = nil) {
         let calls = message.functions
         let total = calls.count
         var resultBuffer = Array<MessageStruct?>(repeating: nil, count: total)
         var pendingCount = total
+        let convId = requestConversationId
 
-        // Hot-loaded JS skills emit progress via the registry's logHandler;
-        // wire it into the shimmer once so any of the parallel calls can
-        // surface a live status line.
         DynamicSkillRegistry.shared.logHandler = { [weak self] _, line in
             DispatchQueue.main.async {
                 self?.ai_state = .Thinking(text: line)
@@ -1173,11 +1242,6 @@ extension MessagingVC: MessageBoxDelegate {
         }
 
         for (index, call) in calls.enumerated() {
-            // Stamp a key for the activity log so the expanded AgentView can
-            // pair toolCall→toolResult and render a live "running N tools"
-            // caption while the batch is in flight. Provider-issued ids are
-            // preferred when present; otherwise we synthesize one purely for
-            // the log (the wire layer falls back to its own nil-handling).
             let activityKey = call.callId ?? UUID().uuidString
             AgentActivityLog.shared.beginToolCall(
                 callId: activityKey,
@@ -1187,11 +1251,6 @@ extension MessagingVC: MessageBoxDelegate {
             self.dispatchCall(call) { [weak self] result in
                 guard let self = self else { return }
                 var r = result
-                // Pair the result back to the originating call so the wire
-                // layer can emit a structured `tool_result` (Anthropic) or
-                // `role:"tool"` (OpenAI) message instead of falling back to
-                // prose — without this binding the model can't reliably tell
-                // which result came from which call.
                 if r.callId == nil { r.callId = call.callId }
                 if r.name == nil   { r.name   = call.name }
                 DispatchQueue.main.async {
@@ -1202,41 +1261,45 @@ extension MessagingVC: MessageBoxDelegate {
                     resultBuffer[index] = r
                     pendingCount -= 1
                     if pendingCount == 0 {
-                        self.finishToolBatch(resultBuffer.compactMap { $0 })
+                        self.finishToolBatch(resultBuffer.compactMap { $0 }, requestConversationId: convId)
                     }
                 }
             }
         }
     }
 
-    /// Persist + append every tool result, then issue one follow-up chat.
-    /// Mirrors the post-append tail of `didSendMessageStruct` minus the
-    /// Apple-LLM offline branch (the harness routes to its own
-    /// `offlineRespond` when the device is offline and never reaches this
-    /// path with tools in flight).
-    private func finishToolBatch(_ results: [MessageStruct]) {
-        let conversation = ensureCurrentConversation()
+    private func finishToolBatch(_ results: [MessageStruct], requestConversationId: String? = nil) {
+        let targetId = requestConversationId ?? activeRequestConversationId ?? currentConversationEntity?.id
+        let conversation: SimpleConversation
+        if let id = targetId, let target = conversationManager.getConversation(by: id) {
+            conversation = target
+        } else {
+            conversation = ensureCurrentConversation()
+        }
+
+        let isViewing = currentConversationEntity?.id == conversation.id
         for r in results {
             conversationManager.addMessage(r, to: conversation)
-            self.messages.append(r)
+            if isViewing { self.messages.append(r) }
         }
-        currentConversationEntity = conversationManager.currentConversation
-        self.newMessageSent()
+        if isViewing {
+            currentConversationEntity = conversationManager.currentConversation
+            self.newMessageSent()
+        }
         self.ai_state = .defaultThinking
         VoiceLoopCoordinator.shared.setState(.thinking)
-        DispatchQueue.main.async { self.tableView.reloadData() }
+        if isViewing {
+            DispatchQueue.main.async { self.tableView.reloadData() }
+        }
 
+        let reqConvId = conversation.id
         Cloud.connection.chat(messages: self.chatContextMessages) { [weak self] responseMessage, error in
             guard let self = self else { return }
             self.ai_state = .None
             if let responseMessage = responseMessage {
-                self.processMessage(message: responseMessage)
+                self.processMessage(message: responseMessage, requestConversationId: reqConvId)
                 return
             }
-            // Surface the underlying detail when it's specific (wrong key,
-            // bad model id, quota) so the user can fix it instead of seeing
-            // a generic "couldn't connect" — same gate the user-message
-            // flow uses.
             let detail = error?.localizedDescription ?? ""
             let body: String
             if !detail.isEmpty && !detail.lowercased().hasPrefix("the operation couldn") {
@@ -1246,7 +1309,7 @@ extension MessagingVC: MessageBoxDelegate {
             }
             let errorMessage = MessageStruct(role: "assistant", content: body)
             DispatchQueue.main.async {
-                self.processMessage(message: errorMessage)
+                self.processMessage(message: errorMessage, requestConversationId: reqConvId)
             }
         }
     }
@@ -3030,21 +3093,71 @@ extension MessagingVC: OnboardingCoordinatorHost, OnboardingCardDelegate {
     /// `newMessageSent()` so MainVC's hero orb collapses into the nav-bar
     /// avatar — the empty-state hero shouldn't sit on top of onboarding
     /// cards.
+    ///
+    /// Assistant turns after the initial greeting route through the same
+    /// "Thinking…" shimmer + scroll + reveal beat the regular LLM path uses,
+    /// so onboarding feels like a real conversation rather than instant
+    /// scripted pops. User echoes and the very first greeting (no prior
+    /// message to thinking-after) skip the pause.
     func onboardingPostMessage(_ message: MessageStruct) {
         let conversation = ensureCurrentConversation()
+        let shouldShowThinking = (message.role == "assistant") && !self.messages.isEmpty
+        guard shouldShowThinking else {
+            appendOnboardingMessage(message, to: conversation)
+            return
+        }
+
+        // Reveal beat: shimmer cell sits at the bottom while we "think",
+        // then we swap it for the real bubble. Matches the regular chat
+        // pattern where `ai_state = .defaultThinking` adds an extra row
+        // (see numberOfRowsInSection) until the network call returns.
+        self.ai_state = .defaultThinking
+        tableView.reloadData()
+        DispatchQueue.main.async { [weak self] in
+            self?.scrollOnboardingToBottom()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.scrollOnboardingToBottom()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.onboardingThinkingDelay) { [weak self] in
+            guard let self = self else { return }
+            self.ai_state = .None
+            self.messageIdToAnimate = message.id
+            self.appendOnboardingMessage(message, to: conversation)
+        }
+    }
+
+    /// Shimmer-to-message reveal pause. Long enough to read as the assistant
+    /// thinking, short enough that the script doesn't drag.
+    static let onboardingThinkingDelay: TimeInterval = 0.8
+
+    /// Common append + reload + scroll used by both the immediate path
+    /// (user echoes, first greeting) and the post-thinking reveal path
+    /// (later assistant turns). Two-stage scroll: the first pass fires after
+    /// reloadData's layout so the cell self-sizes, the second covers the
+    /// case where the keyboard adjusted the table's bottom inset between
+    /// layout passes (common right after the user replies to .askName — the
+    /// LLM call returns async while the keyboard is still up, then
+    /// post-keyboard dismissal the inset shrinks and `.top` alignment would
+    /// otherwise leave the new bubble off-screen). `.bottom` keeps the
+    /// bubble pinned above the input bar in both states.
+    private func appendOnboardingMessage(_ message: MessageStruct, to conversation: SimpleConversation) {
         self.messages.append(message)
         conversationManager.addMessage(message, to: conversation)
         currentConversationEntity = conversationManager.currentConversation
         newMessageSent()
         tableView.reloadData()
-        // Two-stage scroll: the first pass fires after reloadData's layout
-        // so the cell self-sizes, the second covers the case where the
-        // keyboard adjusted the table's bottom inset between layout passes
-        // (common right after the user replies to .askName — the LLM call
-        // returns async while the keyboard is still up, then post-keyboard
-        // dismissal the inset shrinks and `.top` alignment would otherwise
-        // leave the new bubble off-screen). `.bottom` keeps the bubble
-        // pinned above the input bar in both states.
+        // Mirror the haptic beats the regular chat path fires (send haptic on
+        // user echo bubbles, response haptic on assistant turns). Onboarding
+        // bubbles short-circuit the LLM dispatch so without this they're
+        // silent, which makes the scripted flow feel less alive than the rest
+        // of the app.
+        if message.role == "user" {
+            sendHapticGenerator.impactOccurred()
+        } else if message.role == "assistant" {
+            responseHapticGenerator.impactOccurred()
+        }
         DispatchQueue.main.async { [weak self] in
             self?.scrollOnboardingToBottom()
         }
@@ -3093,12 +3206,12 @@ extension MessagingVC: OnboardingCoordinatorHost, OnboardingCardDelegate {
     }
 
     /// Coordinator → host: raise the keyboard so the user can start typing
-    /// straight after a scripted prompt (currently the greeting). Deferred
-    /// one runloop so the table reload that posted the prompt finishes
-    /// before the keyboard animation starts — otherwise the new bubble
-    /// gets briefly clipped under the rising keyboard before scroll catches up.
+    /// straight after a scripted prompt (currently the .askName step).
+    /// Deferred by the same beat as the assistant reveal so the keyboard
+    /// rises in sync with the prompt appearing — not on top of the
+    /// "Thinking…" shimmer.
     func onboardingFocusMessageBox() {
-        DispatchQueue.main.async { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.onboardingThinkingDelay) { [weak self] in
             self?.messageBox.textView.becomeFirstResponder()
         }
     }
