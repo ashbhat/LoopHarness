@@ -31,6 +31,8 @@ enum JSRuntimeError: Error, LocalizedError {
     case scriptError(String)
     case timedOut
     case invalidResult
+    case maxCallDepthExceeded
+    case skillNotFound(String)
 
     var errorDescription: String? {
         switch self {
@@ -38,6 +40,8 @@ enum JSRuntimeError: Error, LocalizedError {
         case .scriptError(let m): return "JS error: \(m)"
         case .timedOut:           return "Skill exceeded its execution time budget."
         case .invalidResult:      return "Skill returned a value that couldn't be serialized to JSON."
+        case .maxCallDepthExceeded: return "Skill call depth exceeded maximum (skills calling skills too deeply)."
+        case .skillNotFound(let n): return "Skill '\(n)' not found. Check installed skills."
         }
     }
 }
@@ -46,11 +50,19 @@ enum JSRuntimeError: Error, LocalizedError {
 /// want within this window, but won't be allowed to spin forever.
 private let defaultTimeoutSeconds: TimeInterval = 30
 
+/// Maximum nesting depth for skill-to-skill calls via `host.callSkill`.
+private let maxCallDepth: Int = 5
+
 final class JSRuntime {
 
     /// Live progress callback fired whenever the skill calls `host.log(...)`.
     /// The registry forwards these to the chat UI's shimmer label.
     typealias LogHandler = (String) -> Void
+
+    /// Closure provided by DynamicSkillRegistry to resolve a skill by name and
+    /// execute it, enabling `host.callSkill(name, args)`. The closure receives
+    /// (skillName, args, currentDepth, completion).
+    typealias SkillCompositionDispatcher = (String, [String: Any], Int, @escaping (Result<Any, Error>) -> Void) -> Void
 
     private let queue = DispatchQueue(label: "loop.jsruntime", qos: .userInitiated)
 
@@ -59,10 +71,16 @@ final class JSRuntime {
     /// `JSContext` per invocation — cheap, and means skills can't bleed
     /// globals into each other. `logHandler` receives every `host.log(...)`
     /// the skill emits while running.
+    ///
+    /// - Parameters:
+    ///   - callDepth: Current nesting depth for skill-to-skill calls.
+    ///   - skillDispatcher: Optional closure to resolve `host.callSkill`.
     func run(source: String,
              args: [String: Any],
              logHandler: @escaping LogHandler,
              timeout: TimeInterval = defaultTimeoutSeconds,
+             callDepth: Int = 0,
+             skillDispatcher: SkillCompositionDispatcher? = nil,
              completion: @escaping (Result<Any, Error>) -> Void) {
 
         queue.async {
@@ -78,7 +96,10 @@ final class JSRuntime {
                 capturedException = exception?.toString() ?? "unknown exception"
             }
 
-            self.installHostBridge(in: context, logHandler: logHandler)
+            self.installHostBridge(in: context,
+                                   logHandler: logHandler,
+                                   callDepth: callDepth,
+                                   skillDispatcher: skillDispatcher)
 
             // Evaluate the skill source and prelude. The prelude wires the
             // callback-style host functions exposed from Swift into Promise-
@@ -145,7 +166,10 @@ final class JSRuntime {
 
     // MARK: - Host bridge
 
-    private func installHostBridge(in context: JSContext, logHandler: @escaping LogHandler) {
+    private func installHostBridge(in context: JSContext,
+                                   logHandler: @escaping LogHandler,
+                                   callDepth: Int,
+                                   skillDispatcher: SkillCompositionDispatcher?) {
 
         // host.__log(str) — synchronous, just forwards to Swift.
         let log: @convention(block) (String) -> Void = { msg in
@@ -198,12 +222,69 @@ final class JSRuntime {
                                   reject: rejectFn)
         }
 
+        // host.__callSkill(name, argsJSON, resolve, reject) — invoke another
+        // skill by name. Enforces max call depth to prevent infinite recursion.
+        let callSkill: @convention(block) (String, String, JSValue, JSValue) -> Void = { [weak self] name, argsJSON, resolveFn, rejectFn in
+            guard let self = self else { return }
+
+            guard callDepth < maxCallDepth else {
+                self.queue.async {
+                    rejectFn.call(withArguments: ["Max skill call depth (\(maxCallDepth)) exceeded"])
+                }
+                return
+            }
+
+            guard let dispatcher = skillDispatcher else {
+                self.queue.async {
+                    rejectFn.call(withArguments: ["Skill composition is not available in this context"])
+                }
+                return
+            }
+
+            let args: [String: Any] = {
+                guard let data = argsJSON.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    return [:]
+                }
+                return obj
+            }()
+
+            dispatcher(name, args, callDepth + 1) { result in
+                self.queue.async {
+                    switch result {
+                    case .success(let value):
+                        // Serialize to JSON and parse in context for clean hand-off
+                        if JSONSerialization.isValidJSONObject(value),
+                           let data = try? JSONSerialization.data(withJSONObject: value),
+                           let json = String(data: data, encoding: .utf8) {
+                            let parsed = context.evaluateScript("(\(json))")
+                            resolveFn.call(withArguments: [parsed as Any])
+                        } else if let str = value as? String {
+                            resolveFn.call(withArguments: [str])
+                        } else {
+                            resolveFn.call(withArguments: [NSNull()])
+                        }
+                    case .failure(let error):
+                        rejectFn.call(withArguments: [error.localizedDescription])
+                    }
+                }
+            }
+        }
+
+        // host.getConfig(key) — synchronous read from the allowed-key config
+        // store. Returns the value or null if not set / not an allowed key.
+        let getConfig: @convention(block) (String) -> String? = { key in
+            return SkillConfigStore.shared.get(rawKey: key)
+        }
+
         let host = JSValue(newObjectIn: context)
-        host?.setObject(log,      forKeyedSubscript: "__log"      as NSString)
-        host?.setObject(http,     forKeyedSubscript: "__http"     as NSString)
-        host?.setObject(notify,   forKeyedSubscript: "notify"     as NSString)
-        host?.setObject(sleep,    forKeyedSubscript: "__sleep"    as NSString)
-        host?.setObject(callTool, forKeyedSubscript: "__callTool" as NSString)
+        host?.setObject(log,       forKeyedSubscript: "__log"       as NSString)
+        host?.setObject(http,      forKeyedSubscript: "__http"      as NSString)
+        host?.setObject(notify,    forKeyedSubscript: "notify"      as NSString)
+        host?.setObject(sleep,     forKeyedSubscript: "__sleep"     as NSString)
+        host?.setObject(callTool,  forKeyedSubscript: "__callTool"  as NSString)
+        host?.setObject(callSkill, forKeyedSubscript: "__callSkill" as NSString)
+        host?.setObject(getConfig, forKeyedSubscript: "getConfig"   as NSString)
         context.setObject(host, forKeyedSubscript: "host" as NSString)
     }
 
@@ -229,6 +310,13 @@ final class JSRuntime {
         return new Promise(function(resolve, reject) {
             try {
                 host.__callTool(String(name), JSON.stringify(args || {}), resolve, reject);
+            } catch (e) { reject(e); }
+        });
+    };
+    host.callSkill = function(name, args) {
+        return new Promise(function(resolve, reject) {
+            try {
+                host.__callSkill(name, JSON.stringify(args || {}), resolve, reject);
             } catch (e) { reject(e); }
         });
     };

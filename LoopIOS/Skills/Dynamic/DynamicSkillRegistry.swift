@@ -41,7 +41,8 @@ final class DynamicSkillRegistry {
     /// Folder name inside the workspace root that holds every skill.
     static let skillsFolderName = "Skills"
 
-    private(set) var skills: [String: LoadedSkill] = [:]
+    /// Publicly readable, internally settable (for testing via @testable import).
+    internal var skills: [String: LoadedSkill] = [:]
 
     /// Callback fired whenever a skill streams `host.log(...)` while running.
     /// Wired from MessagingVC so the shimmer label can reflect live progress.
@@ -208,18 +209,11 @@ can rerun them at any time.
             return
         }
 
-        let skillName = skill.name
-        runtime.run(source: skill.source,
-                    args: functionCall.arguments,
-                    logHandler: { [weak self] msg in
-            self?.logHandler?(skillName, msg)
-        }) { result in
+        executeSkill(skill, args: functionCall.arguments, callDepth: 0) { result in
+            let skillName = skill.name
             switch result {
             case .success(let value):
                 var payload: [String: Any] = ["status": "success", "skill": skillName]
-                // If the skill returned a dict, splat it in (so `summary`,
-                // `data`, etc. land at the top level the model can read).
-                // Otherwise stash whatever it returned under `result`.
                 if let dict = value as? [String: Any] {
                     for (k, v) in dict { payload[k] = v }
                 } else if !(value is NSNull) {
@@ -238,6 +232,38 @@ can rerun them at any time.
                 ))
             }
         }
+    }
+
+    // MARK: - Skill composition
+
+    /// Execute a skill at a given call depth, wiring in the dispatcher so the
+    /// skill can invoke other skills via `host.callSkill(name, args)`.
+    func executeSkill(_ skill: LoadedSkill,
+                      args: [String: Any],
+                      callDepth: Int,
+                      completion: @escaping (Result<Any, Error>) -> Void) {
+
+        let skillName = skill.name
+        let dispatcher: JSRuntime.SkillCompositionDispatcher = { [weak self] targetName, targetArgs, depth, cb in
+            guard let self = self else {
+                cb(.failure(JSRuntimeError.scriptError("Registry deallocated")))
+                return
+            }
+            guard let target = self.skills[targetName] else {
+                cb(.failure(JSRuntimeError.skillNotFound(targetName)))
+                return
+            }
+            self.executeSkill(target, args: targetArgs, callDepth: depth, completion: cb)
+        }
+
+        runtime.run(source: skill.source,
+                    args: args,
+                    logHandler: { [weak self] msg in
+            self?.logHandler?(skillName, msg)
+        },
+                    callDepth: callDepth,
+                    skillDispatcher: dispatcher,
+                    completion: completion)
     }
 
     // MARK: - Mutators (used by SkillBuilderSkill)

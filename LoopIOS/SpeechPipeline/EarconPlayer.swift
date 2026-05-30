@@ -23,9 +23,9 @@ final class EarconPlayer {
     private let format: AVAudioFormat
     private var buffers: [Name: AVAudioPCMBuffer] = [:]
 
-    /// Set to false to silence all earcons globally. MessagingVC binds this
-    /// to the speaker mute toggle so disabling voice playback also disables
-    /// the cues.
+    /// Set to false to silence all earcons globally. Earcons are independent
+    /// of the speaker mute toggle — muting voice playback does not silence the
+    /// state-transition cues.
     var enabled = true
 
     private init() {
