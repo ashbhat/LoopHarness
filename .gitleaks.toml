@@ -5,7 +5,7 @@
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "LoopHarness intentional placeholders & example files"
 
 paths = [
@@ -22,3 +22,13 @@ regexes = [
   '''your-backend\.example\.com''',
   '''your-domain\.ngrok-free\.dev''',
 ]
+
+# SSHSkill.swift documents the PEM headers it accepts in a doc comment.
+# The `private-key` rule matches those bare `-----BEGIN ... PRIVATE KEY-----`
+# header strings even though no key material follows. Scope this to the file
+# AND the documentation context so the rule stays fully active everywhere else.
+[[allowlists]]
+description = "Doc-comment PEM header references in SSHSkill (no key material)"
+condition = "AND"
+paths = ['''LoopIOS/Skills/SSH/SSHSkill\.swift''']
+regexes = ['''-----BEGIN OPENSSH PRIVATE KEY-----`\), ed25519 \+ ECDSA''']

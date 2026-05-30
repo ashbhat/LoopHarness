@@ -118,7 +118,11 @@ class MainVC: MessagingVC {
            let window = view.window {
             let dest = vc.agentView.avatar
             AvatarPopAnimator.play(from: source, to: dest, in: window, duration: 0.65) {
-                source.isHidden = false
+                // Leave the nav-bar orb hidden for the lifetime of the large
+                // view. Unhiding it here made it flash back the instant the
+                // hero finished flying in (the nav bar is hidden, but the
+                // titleView orb still re-rendered). It's restored on dismiss —
+                // the reverse pop unhides it on a tap, the pan path below does.
                 dest.isHidden = false
             }
         }
@@ -139,6 +143,11 @@ class MainVC: MessagingVC {
             AvatarPopAnimator.play(from: source, to: dest, in: window, duration: 0.55) {
                 dest.isHidden = false
             }
+        } else {
+            // Pan dismiss (or no window to animate in): there's no reverse pop
+            // to restore the nav-bar orb, and it was kept hidden through the
+            // whole presentation — unhide it directly as the nav bar returns.
+            avatar?.isHidden = false
         }
 
         navigationController?.setNavigationBarHidden(false, animated: true)

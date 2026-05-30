@@ -26,6 +26,22 @@ final class SSHSettingsVC: UIViewController {
         return f
     }()
 
+    // Connection status row (hidden until a save triggers a connection check).
+    private let statusRow = UIStackView()
+    private let statusSpinner = UIActivityIndicatorView(style: .medium)
+    private let statusDot = UIView()
+    private let statusLabel = UILabel()
+
+    // Opens an interactive shell using the current values.
+    private let openTerminalButton: UIButton = {
+        var cfg = UIButton.Configuration.filled()
+        cfg.title = "Open Terminal"
+        cfg.image = UIImage(systemName: "terminal")
+        cfg.imagePadding = 8
+        cfg.buttonSize = .large
+        return UIButton(configuration: cfg)
+    }()
+
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
@@ -135,6 +151,67 @@ final class SSHSettingsVC: UIViewController {
                 tv.heightAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
             }
         }
+
+        setupStatusRow()
+
+        openTerminalButton.addTarget(self, action: #selector(openTerminalTapped), for: .touchUpInside)
+        stack.addArrangedSubview(openTerminalButton)
+    }
+
+    private func setupStatusRow() {
+        statusRow.axis = .horizontal
+        statusRow.alignment = .center
+        statusRow.spacing = 8
+        statusRow.isHidden = true
+
+        statusSpinner.hidesWhenStopped = true
+
+        statusDot.translatesAutoresizingMaskIntoConstraints = false
+        statusDot.layer.cornerRadius = 5
+        statusDot.isHidden = true
+        NSLayoutConstraint.activate([
+            statusDot.widthAnchor.constraint(equalToConstant: 10),
+            statusDot.heightAnchor.constraint(equalToConstant: 10),
+        ])
+
+        statusLabel.font = .preferredFont(forTextStyle: .subheadline)
+        statusLabel.numberOfLines = 0
+
+        statusRow.addArrangedSubview(statusSpinner)
+        statusRow.addArrangedSubview(statusDot)
+        statusRow.addArrangedSubview(statusLabel)
+        stack.addArrangedSubview(statusRow)
+    }
+
+    // MARK: - Connection status
+
+    private enum ConnState {
+        case checking
+        case connected
+        case failed(String)
+    }
+
+    private func setStatus(_ state: ConnState) {
+        statusRow.isHidden = false
+        switch state {
+        case .checking:
+            statusDot.isHidden = true
+            statusSpinner.startAnimating()
+            statusLabel.text = "Checking connection…"
+            statusLabel.textColor = .secondaryLabel
+        case .connected:
+            statusSpinner.stopAnimating()
+            statusDot.isHidden = false
+            statusDot.backgroundColor = .systemGreen
+            statusLabel.text = "Connected"
+            statusLabel.textColor = .label
+        case .failed(let message):
+            statusSpinner.stopAnimating()
+            statusDot.isHidden = false
+            statusDot.backgroundColor = .systemRed
+            statusLabel.text = message
+            statusLabel.textColor = .label
+        }
     }
 
     // MARK: - Data
@@ -148,21 +225,54 @@ final class SSHSettingsVC: UIViewController {
         passphraseField.text = cfg.passphrase
     }
 
-    @objc private func saveTapped() {
+    /// Builds an `SSHConfig` from the current field values.
+    private func currentConfig() -> SSHConfig {
         let port = Int(portField.text ?? "22") ?? 22
-        SSHConfigStore.shared.config = SSHConfig(
+        return SSHConfig(
             host: hostField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
             port: port,
             username: usernameField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
             privateKey: privateKeyView.text.trimmingCharacters(in: .whitespacesAndNewlines),
             passphrase: passphraseField.text ?? ""
         )
+    }
 
-        let alert = UIAlertController(title: "Saved", message: "SSH configuration updated.", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
-            self?.navigationController?.popViewController(animated: true)
-        })
-        present(alert, animated: true)
+    @objc private func saveTapped() {
+        view.endEditing(true)
+
+        let config = currentConfig()
+        SSHConfigStore.shared.config = config
+
+        guard config.isConfigured else {
+            setStatus(.failed("Enter host, username, and private key to connect."))
+            return
+        }
+
+        setStatus(.checking)
+        Task { @MainActor in
+            do {
+                try await SSHSkill.shared.testConnection()
+                self.setStatus(.connected)
+            } catch {
+                self.setStatus(.failed("Could not connect: \(error.localizedDescription)"))
+            }
+        }
+    }
+
+    @objc private func openTerminalTapped() {
+        view.endEditing(true)
+
+        let config = currentConfig()
+        guard config.isConfigured else {
+            setStatus(.failed("Enter host, username, and private key to open a terminal."))
+            return
+        }
+        // Persist what we're connecting with, then open the interactive shell
+        // full screen (not a push) so it stands on its own, edge to edge.
+        SSHConfigStore.shared.config = config
+        let terminal = SSHTerminalViewController(config: config)
+        terminal.modalPresentationStyle = .fullScreen
+        present(terminal, animated: true)
     }
 
     // MARK: - Factory helpers

@@ -22,7 +22,6 @@ final class EarconPlayer {
     private let player = AVAudioPlayerNode()
     private let format: AVAudioFormat
     private var buffers: [Name: AVAudioPCMBuffer] = [:]
-    private var started = false
 
     /// Set to false to silence all earcons globally. MessagingVC binds this
     /// to the speaker mute toggle so disabling voice playback also disables
@@ -34,6 +33,20 @@ final class EarconPlayer {
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: format)
         buildBuffers()
+
+        // The first TTS playback starts its own AVAudioEngine and flips the
+        // shared session category/format — that posts a configuration-change
+        // to our engine and STOPS it. iOS requires us to reconnect the node
+        // graph (the mixer's format may have changed) and restart. Without
+        // this, earcons go silent for the rest of the session after the first
+        // spoken reply. `play()` checks `engine.isRunning` and re-starts
+        // lazily; here we just re-wire the graph so that restart succeeds.
+        NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            self.engine.connect(self.player, to: self.engine.mainMixerNode, format: self.format)
+        }
     }
 
     /// Schedule the earcon for playback. Returns immediately. If the engine
@@ -42,8 +55,12 @@ final class EarconPlayer {
     /// stall on an audio glitch.
     func play(_ name: Name) {
         guard enabled, let buf = buffers[name] else { return }
-        if !started { startEngine() }
-        guard started else { return }
+        // Re-validate liveness on every fire — the engine may have been
+        // stopped by the system (TTS starting, session interruption, route
+        // change). A cached "started" flag would let us schedule onto a dead
+        // engine and silently drop the cue.
+        if !engine.isRunning { startEngine() }
+        guard engine.isRunning else { return }
         player.scheduleBuffer(buf, completionHandler: nil)
         if !player.isPlaying { player.play() }
     }
@@ -52,8 +69,8 @@ final class EarconPlayer {
     /// Unused on iOS today (kept symmetric with the Mac surface).
     func playBlocking(_ name: Name, timeout: TimeInterval = 0.5) {
         guard enabled, let buf = buffers[name] else { return }
-        if !started { startEngine() }
-        guard started else { return }
+        if !engine.isRunning { startEngine() }
+        guard engine.isRunning else { return }
         let semaphore = DispatchSemaphore(value: 0)
         player.scheduleBuffer(buf) { semaphore.signal() }
         if !player.isPlaying { player.play() }
@@ -79,7 +96,6 @@ final class EarconPlayer {
 
         do {
             try engine.start()
-            started = true
         } catch {
             print("⚠️ EarconPlayer: engine.start() failed (\(error))")
         }
@@ -104,11 +120,11 @@ final class EarconPlayer {
             Segment(freqs: [440.00], duration: 0.20, volume: 0.10),
         ])
         buffers[.listenStart] = synthesize([
-            Segment(freqs: [659.25], duration: 0.07, volume: 0.10),
+            Segment(freqs: [659.25], duration: 0.07, volume: 0.20),
         ])
         buffers[.listenSend]  = synthesize([
-            Segment(freqs: [523.25], duration: 0.06, volume: 0.10),
-            Segment(freqs: [392.00], duration: 0.10, volume: 0.10),
+            Segment(freqs: [523.25], duration: 0.06, volume: 0.20),
+            Segment(freqs: [392.00], duration: 0.10, volume: 0.20),
         ])
         buffers[.interrupt]   = synthesize([
             Segment(freqs: [329.63], duration: 0.06, volume: 0.12),

@@ -78,39 +78,6 @@ final class AgentLargeView: UIView {
     /// owned by MessagingVC).
     private let muteButton = UIButton(type: .system)
 
-    /// Scrollable rendering of the most recent assistant message. The orb +
-    /// status label show *what* is happening; the transcript shows *what
-    /// the model is actually saying* — important when the user has TTS
-    /// muted or has trouble parsing speech in a noisy room.
-    private let transcriptView = UITextView()
-
-    // MARK: - Transcript reveal state
-
-    /// Full markdown-rendered attributed string we're typing out. Stored so
-    /// we can crop it by length on each animation tick rather than re-running
-    /// the markdown regex pass every frame.
-    private var transcriptAttributed: NSAttributedString?
-    /// Source-text of the transcript currently being revealed. Used to
-    /// dedupe `setAssistantTranscript` calls that arrive with the same
-    /// content (e.g. when the activity log notification fans out for an
-    /// unrelated reason).
-    private var transcriptSource: String = ""
-    /// Current visible prefix length, in attributed-string units.
-    /// Driven by the display link tick.
-    private var revealedLength: Int = 0
-    /// Wall-clock when the current animation started; combined with
-    /// `animationStartLength` and `revealRate` gives the target length on
-    /// each tick. Using wall-clock instead of frame count keeps the reveal
-    /// rate consistent across 60Hz vs 120Hz ProMotion devices.
-    private var animationStartedAt: CFTimeInterval = 0
-    private var animationStartLength: Int = 0
-    private var revealDisplayLink: CADisplayLink?
-    /// Characters revealed per second while TTS is active. Tuned to feel a
-    /// hair faster than typical TTS cadence so the text leads the speech
-    /// instead of trailing it — leading reads as "transcript", trailing
-    /// reads as "captions running behind." 22 cps ≈ 220 wpm.
-    private static let revealRate: Double = 22
-
     /// Press-and-hold capsule sitting above the sub-agent row. The expanded
     /// view is voice-first, so the pill is the dominant input affordance —
     /// hold to record, release to send. No tap behavior on purpose (text
@@ -151,9 +118,8 @@ final class AgentLargeView: UIView {
     /// reads as the focal element. Sits behind everything.
     private let backdrop = CAGradientLayer()
 
-    /// How many ticker rows we keep on screen. Kept low so the transcript
-    /// view (which sits above the ticker) gets the lion's share of vertical
-    /// space — the ticker is supplementary, the transcript is primary.
+    /// How many ticker rows we keep on screen. Kept low so the strip stays
+    /// calm and the orb remains the focal element.
     private let maxTickerLines = 3
 
     override init(frame: CGRect) {
@@ -172,7 +138,6 @@ final class AgentLargeView: UIView {
 
     deinit {
         NotificationCenter.default.removeObserver(self)
-        revealDisplayLink?.invalidate()
     }
 
     // MARK: - Setup
@@ -211,7 +176,6 @@ final class AgentLargeView: UIView {
         addSubview(dismissHint)
 
         setupMuteButton()
-        setupTranscriptView()
         setupVoicePill()
 
         tickerContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -272,15 +236,7 @@ final class AgentLargeView: UIView {
             statusLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 32),
             statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -32),
 
-            transcriptView.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 12),
-            transcriptView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
-            transcriptView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
-            // The transcript is the dominant middle element — give it the
-            // bulk of the vertical slack between the orb and the ticker,
-            // but cap it so a long monologue doesn't crowd the pill.
-            transcriptView.heightAnchor.constraint(lessThanOrEqualToConstant: 220),
-
-            tickerContainer.topAnchor.constraint(equalTo: transcriptView.bottomAnchor, constant: 12),
+            tickerContainer.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 12),
             tickerContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
             tickerContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
             tickerContainer.bottomAnchor.constraint(equalTo: voicePill.topAnchor, constant: -16),
@@ -374,34 +330,6 @@ final class AgentLargeView: UIView {
         applyMuteButtonStyle()
     }
 
-    /// Transcript view setup. UITextView (not UILabel) because we want
-    /// selection/copy for long replies and scrolling when the model
-    /// monologues past the available height.
-    private func setupTranscriptView() {
-        transcriptView.translatesAutoresizingMaskIntoConstraints = false
-        transcriptView.isEditable = false
-        transcriptView.isSelectable = true
-        transcriptView.isScrollEnabled = true
-        transcriptView.backgroundColor = .clear
-        // Left-aligned so markdown headers / bullets / inline code don't get
-        // their structure mangled by center alignment. The body font is
-        // pulled from the shared markdown renderer (UIFont.preferredFont
-        // forTextStyle: .body), so we don't set a font here — letting the
-        // attributedText pass own typography end-to-end.
-        transcriptView.textContainerInset = UIEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
-        transcriptView.textContainer.lineFragmentPadding = 0
-        transcriptView.showsVerticalScrollIndicator = false
-        // Match the rest of the overlay's link styling. Without this, link
-        // taps inside the transcript would route through the default
-        // .systemBlue but lose the underline that the renderer applies on
-        // construction.
-        transcriptView.linkTextAttributes = [
-            .foregroundColor: UIColor.systemBlue,
-            .underlineStyle: NSUnderlineStyle.single.rawValue
-        ]
-        addSubview(transcriptView)
-    }
-
     override func layoutSubviews() {
         super.layoutSubviews()
         backdrop.frame = bounds
@@ -471,114 +399,6 @@ final class AgentLargeView: UIView {
         applyMuteButtonStyle()
     }
 
-    // MARK: - Transcript
-
-    /// Pump the latest assistant transcript from the activity log into the
-    /// text view. Routes the source through `MarkdownAttributedString` and
-    /// — when TTS is or will be playing — kicks off a per-character reveal
-    /// animation so the text appears to be typed out alongside the speech.
-    /// Falls back to hidden so the layout collapses gracefully when nothing
-    /// has been said yet (fresh conversation, first launch).
-    private func refreshTranscript() {
-        let raw = AgentActivityLog.shared.assistantTranscript ?? ""
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            transcriptSource = ""
-            transcriptAttributed = nil
-            revealedLength = 0
-            stopRevealAnimation()
-            transcriptView.attributedText = nil
-            transcriptView.isHidden = true
-            return
-        }
-        transcriptView.isHidden = false
-        // Same content as last time — let the in-flight animation keep
-        // ticking. Re-rendering would reset the reveal to 0 and feel like
-        // a flicker on every activity-log notification.
-        if trimmed == transcriptSource { return }
-        transcriptSource = trimmed
-        let attributed = MarkdownAttributedString.render(trimmed)
-        transcriptAttributed = attributed
-        revealedLength = 0
-        transcriptView.setContentOffset(.zero, animated: false)
-
-        // Animate while the orb is actively producing speech (.thinking →
-        // .speaking transition is fast; we kick off as soon as the
-        // transcript exists so the text never flashes fully visible right
-        // before TTS starts). If the user has TTS muted or the state is
-        // already .idle, snap to fully revealed — there's no audio to
-        // sync to.
-        let state = VoiceLoopCoordinator.shared.state
-        let muted = voiceDelegate?.agentLargeViewIsMuted() ?? false
-        if !muted && state != .idle {
-            startRevealAnimation()
-        } else {
-            snapRevealToFull()
-        }
-    }
-
-    /// Begin (or continue) the per-character reveal. Idempotent — calling
-    /// while a display link is already attached just updates the start
-    /// markers so the rate stays constant.
-    private func startRevealAnimation() {
-        guard let attributed = transcriptAttributed, attributed.length > 0 else { return }
-        // Already at full length — nothing to do.
-        if revealedLength >= attributed.length {
-            applyRevealedSubstring()
-            return
-        }
-        animationStartedAt = CACurrentMediaTime()
-        animationStartLength = revealedLength
-        if revealDisplayLink == nil {
-            let link = CADisplayLink(target: self, selector: #selector(handleRevealTick))
-            link.add(to: .main, forMode: .common)
-            revealDisplayLink = link
-        }
-        applyRevealedSubstring()
-    }
-
-    @objc private func handleRevealTick() {
-        guard let attributed = transcriptAttributed else {
-            stopRevealAnimation()
-            return
-        }
-        let elapsed = CACurrentMediaTime() - animationStartedAt
-        let advance = Int(elapsed * Self.revealRate)
-        revealedLength = min(attributed.length, animationStartLength + advance)
-        applyRevealedSubstring()
-        if revealedLength >= attributed.length {
-            stopRevealAnimation()
-        }
-    }
-
-    private func stopRevealAnimation() {
-        revealDisplayLink?.invalidate()
-        revealDisplayLink = nil
-    }
-
-    /// Show the entire transcript instantly — used when TTS is muted, when
-    /// the state hits .idle while we're mid-reveal (model finished
-    /// speaking before the typewriter caught up), or when the view first
-    /// loads with a previous transcript already cached.
-    private func snapRevealToFull() {
-        stopRevealAnimation()
-        if let attributed = transcriptAttributed {
-            revealedLength = attributed.length
-            applyRevealedSubstring()
-        }
-    }
-
-    /// Push the currently-revealed prefix into the text view. Cropping the
-    /// already-styled attributed string preserves bold/header/link runs on
-    /// the visible portion, so the markdown style doesn't pop in at the
-    /// end — each character appears already-styled as it lands.
-    private func applyRevealedSubstring() {
-        guard let attributed = transcriptAttributed else { return }
-        let len = max(0, min(revealedLength, attributed.length))
-        let sub = attributed.attributedSubstring(from: NSRange(location: 0, length: len))
-        transcriptView.attributedText = sub
-    }
-
     /// Forward the press-and-hold lifecycle to the voice delegate. `.began`
     /// fires immediately because we set `minimumPressDuration = 0.05`, so it
     /// reads as a touch-down for users. `.ended` is the natural release —
@@ -628,15 +448,7 @@ final class AgentLargeView: UIView {
 
     @objc private func stateDidChange() {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.applyVoiceState()
-            // When the coordinator drops to .idle (TTS finished), make
-            // sure the typewriter catches up — the audio is done, so
-            // continuing to drip out characters would leave the user
-            // reading "captions" behind the orb's actual state.
-            if VoiceLoopCoordinator.shared.state == .idle {
-                self.snapRevealToFull()
-            }
+            self?.applyVoiceState()
         }
     }
 
@@ -651,7 +463,6 @@ final class AgentLargeView: UIView {
     /// notification.
     func refresh(animated: Bool) {
         applyVoiceState()
-        refreshTranscript()
         applyMuteButtonStyle()
         rebuildTicker(animated: animated)
         rebuildSubAgentChips()

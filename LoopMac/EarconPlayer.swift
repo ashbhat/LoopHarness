@@ -26,7 +26,6 @@ final class EarconPlayer {
     private let player = AVAudioPlayerNode()
     private let format: AVAudioFormat
     private var buffers: [Name: AVAudioPCMBuffer] = [:]
-    private var started = false
 
     /// Set to false to silence all earcons globally — useful if the user
     /// finds them annoying. Not currently surfaced in UI; flip in code
@@ -40,13 +39,28 @@ final class EarconPlayer {
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: format)
         buildBuffers()
+
+        // A configuration change (output device switch, another engine taking
+        // over the default output) stops our engine. Reconnect the node graph
+        // at the new format so the next play() can restart it — otherwise
+        // earcons go silent after the first such change.
+        NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            self.engine.connect(self.player, to: self.engine.mainMixerNode, format: self.format)
+        }
     }
 
     /// Schedule the earcon for playback. Returns immediately. If the
     /// engine isn't running yet, starts it lazily on first call.
     func play(_ name: Name) {
         guard enabled, let buf = buffers[name] else { return }
-        if !started { startEngine() }
+        // Re-validate liveness on every fire — the engine may have been
+        // stopped by a configuration change. A cached "started" flag would
+        // let us schedule onto a dead engine and silently drop the cue.
+        if !engine.isRunning { startEngine() }
+        guard engine.isRunning else { return }
         player.scheduleBuffer(buf, completionHandler: nil)
         if !player.isPlaying { player.play() }
     }
@@ -56,7 +70,8 @@ final class EarconPlayer {
     /// we need the sound to actually play before the process exits.
     func playBlocking(_ name: Name, timeout: TimeInterval = 0.5) {
         guard enabled, let buf = buffers[name] else { return }
-        if !started { startEngine() }
+        if !engine.isRunning { startEngine() }
+        guard engine.isRunning else { return }
         let semaphore = DispatchSemaphore(value: 0)
         player.scheduleBuffer(buf) { semaphore.signal() }
         if !player.isPlaying { player.play() }
@@ -66,7 +81,6 @@ final class EarconPlayer {
     private func startEngine() {
         do {
             try engine.start()
-            started = true
         } catch {
             print("⚠️ EarconPlayer: engine.start() failed (\(error))")
         }
