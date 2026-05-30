@@ -48,6 +48,9 @@ final class SettingsVC: UIViewController {
             },
             Row(title: "SSH", icon: "terminal") { settings in
                 settings.navigationController?.pushViewController(SSHSettingsVC(), animated: true)
+            },
+            Row(title: "Runners", icon: "server.rack") { settings in
+                settings.navigationController?.pushViewController(RunnersListVC(), animated: true)
             }
         ]),
         // Lives in its own section so it reads as a discrete debug/utility

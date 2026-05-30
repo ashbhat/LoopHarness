@@ -67,6 +67,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // the user lands here through some other surface.
         drainSharedInbox()
 
+        // Start the runner foreground poller (3-second cadence).
+        LoopRunnerPoller.shared.startForegroundPolling()
+
         // Keep the screen on while Loop is in the foreground. The app is
         // primarily a conversational surface — locking mid-thought breaks
         // the spell. iOS restores the idle timer automatically when the app
@@ -79,6 +82,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // Called when the scene will move from an active state to an inactive state.
         // This may occur due to temporary interruptions (ex. an incoming phone call).
         UIApplication.shared.isIdleTimerDisabled = false
+        LoopRunnerPoller.shared.stopForegroundPolling()
     }
 
     func sceneWillEnterForeground(_ scene: UIScene) {

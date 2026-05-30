@@ -1,0 +1,10 @@
+{
+  "apns_key_path": "",
+  "apns_key_id": "XXXXXXXXXX",
+  "apns_team_id": "XXXXXXXXXX",
+  "apns_bundle_id": "com.example.loop",
+  "device_push_token": "",
+  "model_api_key": "sk-...",
+  "shared_secret": "change-me-to-a-random-string",
+  "listen_port": 8080
+}
