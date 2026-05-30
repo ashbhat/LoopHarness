@@ -108,6 +108,14 @@ class SideDrawerViewController: UIViewController {
         let title: String
         let subtitle: String
         let isDynamic: Bool
+        /// OpenAI-style function schemas this skill exposes. Bundled built-ins
+        /// carry their catalog `tools`; dynamic skills carry a single
+        /// synthesized schema from their manifest. The detail sheet renders
+        /// each tool's parameters with descriptions.
+        let tools: [[String: Any]]
+        /// Present only for user-authored skills — carries the source and
+        /// on-disk metadata for the detail sheet. nil for bundled built-ins.
+        let dynamic: DynamicSkillRegistry.LoadedSkill?
     }
     private var skillRows: [SkillRow] = []
 
@@ -562,12 +570,27 @@ class SideDrawerViewController: UIViewController {
     /// show up without an app relaunch.
     private func rebuildSkillRows() {
         var rows: [SkillRow] = AgentHarness.bundledSkillCatalog.map {
-            SkillRow(title: $0.name, subtitle: $0.summary, isDynamic: false)
+            SkillRow(title: $0.name, subtitle: $0.summary, isDynamic: false,
+                     tools: $0.tools, dynamic: nil)
         }
         DynamicSkillRegistry.shared.reload()
         let dynamic = DynamicSkillRegistry.shared.skills.values
             .sorted { $0.name < $1.name }
-            .map { SkillRow(title: $0.name, subtitle: $0.description, isDynamic: true) }
+            .map { skill -> SkillRow in
+                // Synthesize an OpenAI-style schema from the manifest so the
+                // detail sheet renders dynamic skills through the same
+                // per-parameter view as built-ins.
+                let schema: [String: Any] = [
+                    "type": "function",
+                    "function": [
+                        "name": skill.name,
+                        "description": skill.description,
+                        "parameters": skill.parameters,
+                    ],
+                ]
+                return SkillRow(title: skill.name, subtitle: skill.description,
+                                isDynamic: true, tools: [schema], dynamic: skill)
+            }
         rows.append(contentsOf: dynamic)
         skillRows = rows
     }
@@ -785,10 +808,30 @@ extension SideDrawerViewController: UITableViewDataSource, UITableViewDelegate {
                 presentPreview(for: row.url)
             }
         case .skills:
-            // Read-only listing — no detail screen yet. Deselect so the row
-            // doesn't stay highlighted.
-            break
+            let row = skillRows[indexPath.row]
+            presentSkillDetail(for: row)
         }
+    }
+
+    /// Present a skill's details in a sheet-modal. Built-ins show their name +
+    /// summary; user-authored skills additionally surface their parameter
+    /// schema, source, and on-disk metadata.
+    private func presentSkillDetail(for row: SkillRow) {
+        let detail = SkillDetailViewController(
+            title: row.title,
+            summary: row.subtitle,
+            isDynamic: row.isDynamic,
+            tools: row.tools,
+            dynamic: row.dynamic
+        )
+        let nav = UINavigationController(rootViewController: detail)
+        if let sheet = nav.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+            sheet.prefersScrollingExpandsWhenScrolledToEdge = true
+        }
+        let presenter = topMostPresenter() ?? self
+        presenter.present(nav, animated: true)
     }
 
     func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
@@ -974,6 +1017,356 @@ private final class SkillCell: UITableViewCell {
         // the generic puzzle-piece extension glyph.
         iconView.image = UIImage(systemName: isDynamic ? "hammer.fill" : "puzzlepiece.extension.fill")
         iconView.tintColor = isDynamic ? .systemOrange : .systemBlue
+    }
+}
+
+// MARK: - Skill detail
+
+/// Sheet-modal showing a single skill's details. Presented when a row in the
+/// Skills tab is tapped. The layout is a vertically-scrolling stack of
+/// sections: a header (icon + name + type badge), the description, each tool
+/// the skill exposes (function name + description + per-parameter docs), and —
+/// for user-authored dynamic skills — the source and on-disk metadata. Built
+/// programmatically to match the rest of the drawer.
+final class SkillDetailViewController: UIViewController {
+
+    private let skillTitle: String
+    private let summary: String
+    private let isDynamic: Bool
+    private let tools: [[String: Any]]
+    private let dynamic: DynamicSkillRegistry.LoadedSkill?
+
+    init(title: String,
+         summary: String,
+         isDynamic: Bool,
+         tools: [[String: Any]],
+         dynamic: DynamicSkillRegistry.LoadedSkill?) {
+        self.skillTitle = title
+        self.summary = summary
+        self.isDynamic = isDynamic
+        self.tools = tools
+        self.dynamic = dynamic
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        title = skillTitle
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .close,
+            target: self,
+            action: #selector(close)
+        )
+        buildContent()
+    }
+
+    @objc private func close() {
+        dismiss(animated: true)
+    }
+
+    // MARK: - Layout
+
+    private func buildContent() {
+        let scroll = UIScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.alwaysBounceVertical = true
+        view.addSubview(scroll)
+
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = 24
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        scroll.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: view.topAnchor),
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 20),
+            stack.leadingAnchor.constraint(equalTo: scroll.frameLayoutGuide.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: scroll.frameLayoutGuide.trailingAnchor, constant: -20),
+            stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -32),
+        ])
+
+        // Header: large icon, name, and a type badge.
+        stack.addArrangedSubview(makeHeader())
+
+        // Description.
+        if !summary.isEmpty {
+            stack.addArrangedSubview(makeSection(title: "Description",
+                                                 body: makeBodyLabel(summary)))
+        }
+
+        // Tools the skill exposes, each with its parameters and descriptions.
+        // A skill can declare several functions (e.g. Git has clone/pull/
+        // status), so we render one card per tool.
+        let toolViews = tools.compactMap { makeToolView($0) }
+        if !toolViews.isEmpty {
+            let header = tools.count > 1 ? "Tools (\(tools.count))" : "Tool"
+            let toolsStack = UIStackView(arrangedSubviews: toolViews)
+            toolsStack.axis = .vertical
+            toolsStack.spacing = 12
+            stack.addArrangedSubview(makeSection(title: header, body: toolsStack))
+        }
+
+        // Dynamic-only sections: source and on-disk metadata.
+        if let dynamic {
+            let source = dynamic.source.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !source.isEmpty {
+                stack.addArrangedSubview(makeSection(title: "Source",
+                                                     body: makeCodeView(source)))
+            }
+            if let meta = metadataText(for: dynamic) {
+                stack.addArrangedSubview(makeSection(title: "On disk",
+                                                     body: makeBodyLabel(meta)))
+            }
+        }
+    }
+
+    private func makeHeader() -> UIView {
+        let icon = UIImageView()
+        icon.contentMode = .scaleAspectFit
+        icon.image = UIImage(systemName: isDynamic ? "hammer.fill" : "puzzlepiece.extension.fill")
+        icon.tintColor = isDynamic ? .systemOrange : .systemBlue
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.setContentHuggingPriority(.required, for: .horizontal)
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: 34),
+            icon.heightAnchor.constraint(equalToConstant: 34),
+        ])
+
+        let name = UILabel()
+        name.text = skillTitle
+        name.font = .systemFont(ofSize: 22, weight: .bold)
+        name.numberOfLines = 0
+
+        let badge = makeBadge(isDynamic ? "Custom skill" : "Built-in",
+                              tint: isDynamic ? .systemOrange : .systemBlue)
+
+        let textStack = UIStackView(arrangedSubviews: [name, badge])
+        textStack.axis = .vertical
+        textStack.alignment = .leading
+        textStack.spacing = 8
+
+        let row = UIStackView(arrangedSubviews: [icon, textStack])
+        row.axis = .horizontal
+        row.alignment = .top
+        row.spacing = 12
+        return row
+    }
+
+    /// A pill-shaped label used as the skill-type badge.
+    private func makeBadge(_ text: String, tint: UIColor) -> UIView {
+        let label = UILabel()
+        label.text = text.uppercased()
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = tint
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = UIView()
+        container.backgroundColor = tint.withAlphaComponent(0.15)
+        container.layer.cornerRadius = 6
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 4),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -4),
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+        ])
+        return container
+    }
+
+    /// A section is an uppercase header label stacked above its content view.
+    private func makeSection(title: String, body: UIView) -> UIView {
+        let header = UILabel()
+        header.text = title.uppercased()
+        header.font = .systemFont(ofSize: 12, weight: .semibold)
+        header.textColor = .secondaryLabel
+
+        let stack = UIStackView(arrangedSubviews: [header, body])
+        stack.axis = .vertical
+        stack.spacing = 8
+        return stack
+    }
+
+    private func makeBodyLabel(_ text: String) -> UILabel {
+        let label = UILabel()
+        label.text = text
+        label.font = .systemFont(ofSize: 15)
+        label.textColor = .label
+        label.numberOfLines = 0
+        return label
+    }
+
+    /// Monospaced text in a rounded card — used for parameter JSON and source.
+    private func makeCodeView(_ text: String) -> UIView {
+        let label = UILabel()
+        label.text = text
+        label.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        label.textColor = .label
+        label.numberOfLines = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let card = UIView()
+        card.backgroundColor = .secondarySystemBackground
+        card.layer.cornerRadius = 10
+        card.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            label.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12),
+            label.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
+        ])
+        return card
+    }
+
+    // MARK: - Tool rendering
+
+    /// Render one OpenAI-style function schema as a card: the function name
+    /// (monospaced), its description, and a row per parameter showing name,
+    /// type, a "required" marker, and the parameter's own description.
+    /// Returns nil for a schema we can't read.
+    private func makeToolView(_ schema: [String: Any]) -> UIView? {
+        guard let function = schema["function"] as? [String: Any],
+              let name = function["name"] as? String else { return nil }
+
+        let rows = UIStackView()
+        rows.axis = .vertical
+        rows.spacing = 6
+
+        // Function name.
+        let nameLabel = UILabel()
+        nameLabel.text = name
+        nameLabel.font = .monospacedSystemFont(ofSize: 14, weight: .semibold)
+        nameLabel.textColor = .label
+        nameLabel.numberOfLines = 0
+        rows.addArrangedSubview(nameLabel)
+
+        // Function description.
+        var hasDescription = false
+        if let desc = function["description"] as? String, !desc.isEmpty {
+            let descLabel = UILabel()
+            descLabel.text = desc
+            descLabel.font = .systemFont(ofSize: 13)
+            descLabel.textColor = .secondaryLabel
+            descLabel.numberOfLines = 0
+            rows.addArrangedSubview(descLabel)
+            hasDescription = true
+        }
+
+        // Parameters. Read each property's schema individually so one
+        // malformed entry can't blank out the whole list.
+        let params = function["parameters"] as? [String: Any]
+        let rawProperties = params?["properties"] as? [String: Any] ?? [:]
+        let properties = rawProperties.compactMapValues { $0 as? [String: Any] }
+        let required = Set(params?["required"] as? [String] ?? [])
+        if properties.isEmpty {
+            let none = UILabel()
+            none.text = "No parameters"
+            none.font = .italicSystemFont(ofSize: 12)
+            none.textColor = .tertiaryLabel
+            rows.addArrangedSubview(none)
+        } else {
+            // Required params first, then alphabetical within each group for a
+            // stable, predictable order (the schema dict itself is unordered).
+            let names = properties.keys.sorted { a, b in
+                let ra = required.contains(a), rb = required.contains(b)
+                if ra != rb { return ra }
+                return a < b
+            }
+            for (i, key) in names.enumerated() {
+                if i > 0 || hasDescription {
+                    rows.addArrangedSubview(makeHairline())
+                }
+                rows.addArrangedSubview(
+                    makeParamRow(name: key,
+                                 schema: properties[key] ?? [:],
+                                 isRequired: required.contains(key)))
+            }
+        }
+
+        let card = UIView()
+        card.backgroundColor = .secondarySystemBackground
+        card.layer.cornerRadius = 10
+        rows.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(rows)
+        NSLayoutConstraint.activate([
+            rows.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            rows.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12),
+            rows.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
+            rows.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
+        ])
+        return card
+    }
+
+    /// One parameter: `name` · type [· required], then its description below.
+    private func makeParamRow(name: String,
+                              schema: [String: Any],
+                              isRequired: Bool) -> UIView {
+        var meta: [String] = []
+        if let type = schema["type"] as? String { meta.append(type) }
+        if isRequired { meta.append("required") }
+
+        // The name + type/required line, with the name emphasised.
+        let header = NSMutableAttributedString(
+            string: name,
+            attributes: [
+                .font: UIFont.monospacedSystemFont(ofSize: 13, weight: .medium),
+                .foregroundColor: UIColor.label,
+            ])
+        if !meta.isEmpty {
+            header.append(NSAttributedString(
+                string: "  " + meta.joined(separator: " · "),
+                attributes: [
+                    .font: UIFont.systemFont(ofSize: 12),
+                    .foregroundColor: isRequired ? UIColor.systemRed : UIColor.tertiaryLabel,
+                ]))
+        }
+        let headerLabel = UILabel()
+        headerLabel.attributedText = header
+        headerLabel.numberOfLines = 0
+
+        let stack = UIStackView(arrangedSubviews: [headerLabel])
+        stack.axis = .vertical
+        stack.spacing = 2
+
+        if let desc = schema["description"] as? String, !desc.isEmpty {
+            let descLabel = UILabel()
+            descLabel.text = desc
+            descLabel.font = .systemFont(ofSize: 13)
+            descLabel.textColor = .secondaryLabel
+            descLabel.numberOfLines = 0
+            stack.addArrangedSubview(descLabel)
+        }
+        return stack
+    }
+
+    private func makeHairline() -> UIView {
+        let line = UIView()
+        line.backgroundColor = .separator
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale).isActive = true
+        return line
+    }
+
+    private func metadataText(for skill: DynamicSkillRegistry.LoadedSkill) -> String? {
+        var lines: [String] = []
+        lines.append("Folder: \(skill.folder.lastPathComponent)")
+        if let mtime = skill.scriptMTime ?? skill.manifestMTime {
+            let fmt = DateFormatter()
+            fmt.dateStyle = .medium
+            fmt.timeStyle = .short
+            lines.append("Updated: \(fmt.string(from: mtime))")
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 }
 

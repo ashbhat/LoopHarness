@@ -39,6 +39,35 @@ The runtime exposes this `host` object to every skill:
                              opts = { url, method?, headers?, body?, json? }
 - `host.notify(title, body)` → fire a local push notification
 - `host.sleep(ms)`         → Promise<void>; useful for pacing
+- `host.callTool(name, args)` → invoke one of Loop's BUILT-IN tools and await
+                             its result. Returns the tool's parsed JSON object
+                             (e.g. `{status, stdout, stderr, exit_code}`). This
+                             lets a skill orchestrate native capabilities it
+                             couldn't reach over plain HTTP.
+
+`host.callTool` reaches the same built-in tools the model can call directly —
+for example:
+- `ssh_client({command, timeout?})` → run a shell command on the host
+  configured in Settings → SSH; returns `{status, stdout, stderr, exit_code}`.
+- `git_*`, `github_*`, `exa_search`, `url_fetch`, `image_generate`, etc.
+It can NOT call other user-authored skills (only built-ins), so don't try to
+chain one custom skill into another through it.
+
+Example — a "claude_code" skill that drives a structured Claude Code session
+over SSH:
+    async function run(args, host) {
+      const prompt = args.prompt;
+      host.log("launching claude code…");
+      const res = await host.callTool("ssh_client", {
+        command: `cd ${args.repo || "~"} && claude -p ${JSON.stringify(prompt)} --output-format json`,
+        timeout: 120
+      });
+      if (res.status !== "ok" || res.exit_code !== 0) {
+        return { summary: "Claude Code run failed", error: res.stderr || res.error };
+      }
+      return { summary: "Claude Code finished", output: res.stdout };
+    }
+
 The skill file must export a top-level `async function run(args, host)` that
 returns a JSON-serializable object. Whatever object it returns is what you'll
 see back as the tool result; include a `summary` field with a short

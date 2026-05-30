@@ -1582,10 +1582,6 @@ extension MessagingVC {
     func setupNav() {
         self.title = "Intel"
 
-        // Sync earcon enable flag with the persisted mute state at launch
-        // (the setter wires this on toggles; this covers the cold start).
-        EarconPlayer.shared.enabled = !isMuted
-
         // Left bar button
         let sideBarButton = UIBarButtonItem(image: UIImage(systemName: "line.3.horizontal"), style: .done, target: self, action: #selector(leftBarButtonTapped))
         sideBarButton.tintColor = .secondarySystemBackground
@@ -1630,9 +1626,6 @@ extension MessagingVC {
                                      withConfiguration: cfg)
         // Rebuild so checkmarks reflect the new state on next tap.
         muteButton?.menu = buildSpeakerMenu()
-        // Earcons follow the speaker mute toggle — turning off voice
-        // playback should silence state-transition cues too.
-        EarconPlayer.shared.enabled = !isMuted
     }
 
     /// Builds the speaker-button popover menu: mute toggle, speed presets,
