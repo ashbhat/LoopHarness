@@ -38,6 +38,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         //   4. (No-op on iOS; Mac uses this hook to start its timer loop.)
         BackgroundScheduler.shared.bootstrap()
 
+        // Runner poller — registers the BGAppRefreshTask handler. Must
+        // happen before didFinishLaunchingWithOptions returns.
+        LoopRunnerPoller.shared.bootstrap()
+
         return true
     }
 
@@ -78,6 +82,7 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             // Bookkeeping — bounded jobs decrement, unbounded re-arm.
             BackgroundScheduler.shared.notificationDidFire(jobId: jobId)
         }
+        // Runner turn/job notifications — no bookkeeping needed, just display.
         completionHandler([.banner, .sound, .list])
     }
 
@@ -92,6 +97,13 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         defer { completionHandler() }
 
         let userInfo = response.notification.request.content.userInfo
+
+        // Runner notifications — open the app; the turn id is in userInfo
+        // for future deep-linking. For now just foreground the app.
+        if LoopRunnerPoller.isRunnerNotification(userInfo) {
+            return
+        }
+
         guard BackgroundScheduler.isSchedulerNotification(userInfo) else { return }
 
         // Bookkeeping first so the next placeholder is queued before we

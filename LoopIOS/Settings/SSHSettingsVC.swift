@@ -32,6 +32,16 @@ final class SSHSettingsVC: UIViewController {
     private let statusDot = UIView()
     private let statusLabel = UILabel()
 
+    // Opens an interactive shell using the current values.
+    private let openTerminalButton: UIButton = {
+        var cfg = UIButton.Configuration.filled()
+        cfg.title = "Open Terminal"
+        cfg.image = UIImage(systemName: "terminal")
+        cfg.imagePadding = 8
+        cfg.buttonSize = .large
+        return UIButton(configuration: cfg)
+    }()
+
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
@@ -143,6 +153,9 @@ final class SSHSettingsVC: UIViewController {
         }
 
         setupStatusRow()
+
+        openTerminalButton.addTarget(self, action: #selector(openTerminalTapped), for: .touchUpInside)
+        stack.addArrangedSubview(openTerminalButton)
     }
 
     private func setupStatusRow() {
@@ -212,17 +225,22 @@ final class SSHSettingsVC: UIViewController {
         passphraseField.text = cfg.passphrase
     }
 
-    @objc private func saveTapped() {
-        view.endEditing(true)
-
+    /// Builds an `SSHConfig` from the current field values.
+    private func currentConfig() -> SSHConfig {
         let port = Int(portField.text ?? "22") ?? 22
-        let config = SSHConfig(
+        return SSHConfig(
             host: hostField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
             port: port,
             username: usernameField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
             privateKey: privateKeyView.text.trimmingCharacters(in: .whitespacesAndNewlines),
             passphrase: passphraseField.text ?? ""
         )
+    }
+
+    @objc private func saveTapped() {
+        view.endEditing(true)
+
+        let config = currentConfig()
         SSHConfigStore.shared.config = config
 
         guard config.isConfigured else {
@@ -239,6 +257,22 @@ final class SSHSettingsVC: UIViewController {
                 self.setStatus(.failed("Could not connect: \(error.localizedDescription)"))
             }
         }
+    }
+
+    @objc private func openTerminalTapped() {
+        view.endEditing(true)
+
+        let config = currentConfig()
+        guard config.isConfigured else {
+            setStatus(.failed("Enter host, username, and private key to open a terminal."))
+            return
+        }
+        // Persist what we're connecting with, then open the interactive shell
+        // full screen (not a push) so it stands on its own, edge to edge.
+        SSHConfigStore.shared.config = config
+        let terminal = SSHTerminalViewController(config: config)
+        terminal.modalPresentationStyle = .fullScreen
+        present(terminal, animated: true)
     }
 
     // MARK: - Factory helpers

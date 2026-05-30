@@ -1,0 +1,44 @@
+name: go-runtime
+
+# Builds and tests the Portable Loop Runner (runtime/go). Scoped to that
+# directory so it only runs when the Go runtime changes.
+on:
+  push:
+    paths:
+      - "runtime/go/**"
+      - ".github/workflows/go.yml"
+  pull_request:
+    paths:
+      - "runtime/go/**"
+      - ".github/workflows/go.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: runtime/go
+
+jobs:
+  build-test:
+    name: build & test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: runtime/go/go.mod
+          cache-dependency-path: runtime/go/go.sum
+
+      - name: Vet
+        run: CGO_ENABLED=0 go vet ./...
+
+      - name: Test
+        run: CGO_ENABLED=0 go test ./... -count=1
+
+      - name: Build (linux static binary)
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o loop-runner .

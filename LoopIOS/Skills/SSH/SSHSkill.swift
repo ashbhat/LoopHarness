@@ -159,6 +159,29 @@ final class SSHSkill {
         )
     }
 
+    // MARK: - Reusable command execution
+
+    /// Runs a shell command on the host configured in Settings → SSH and
+    /// returns its stdout/stderr/exit code. Shared entry point for callers
+    /// outside the agent tool path (e.g. the Loop Runner SSH transport).
+    /// Throws if SSH isn't configured or the connection fails.
+    func runCommand(_ command: String, timeout: Double = 30) async throws -> CommandResult {
+        let config = SSHConfigStore.shared.config
+        guard config.isConfigured else {
+            throw SSHSkillError.connectionFailed(
+                "SSH is not configured. Set host, username, and private key in Settings → SSH.")
+        }
+        return try await runSSHCommand(
+            host: config.host,
+            port: config.port,
+            username: config.username,
+            privateKey: config.privateKey,
+            passphrase: config.passphrase,
+            command: command,
+            timeout: timeout
+        )
+    }
+
     // MARK: - NIOSSH connection
 
     struct CommandResult {
@@ -267,7 +290,11 @@ final class SSHSkill {
     ///   • raw base64 ed25519 seed
     /// For EC keys the curve is inferred from the private-scalar length, so the
     /// curve-parameter encoding (named vs. explicit) doesn't matter.
-    private func parsePrivateKey(pem: String, passphrase: String) throws -> NIOSSHPrivateKey {
+    ///
+    /// Internal (not private) so the interactive terminal transport
+    /// (`SSHTerminalSession`) can build a `NIOSSHPrivateKey` from the same
+    /// saved configuration without duplicating the parsing logic.
+    func parsePrivateKey(pem: String, passphrase: String) throws -> NIOSSHPrivateKey {
         let trimmed = pem.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // OpenSSH format has a distinctive header and a non-DER body.
@@ -527,7 +554,9 @@ enum SSHSkillError: LocalizedError {
 
 // MARK: - NIOSSH delegates
 
-private final class SSHPrivateKeyAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
+// Internal (not file-private): reused by the interactive terminal transport
+// in SSHTerminalSession.swift, which performs the same public-key auth.
+final class SSHPrivateKeyAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     private let username: String
     private let privateKey: NIOSSHPrivateKey
 
@@ -554,7 +583,7 @@ private final class SSHPrivateKeyAuthDelegate: NIOSSHClientUserAuthenticationDel
     }
 }
 
-private final class SSHAcceptAllHostKeysDelegate: NIOSSHClientServerAuthenticationDelegate {
+final class SSHAcceptAllHostKeysDelegate: NIOSSHClientServerAuthenticationDelegate {
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
         sshLog.info("hostkey: accepting (no verification)")
         validationCompletePromise.succeed(())
