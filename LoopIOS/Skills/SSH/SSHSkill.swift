@@ -13,6 +13,11 @@ import NIOCore
 import NIOPosix
 import NIOSSH
 import Crypto
+import os
+
+/// Diagnostic logger for the SSH connection path. View in Console.app or the
+/// Xcode console by filtering on subsystem `com.bhat.intel`, category `SSH`.
+let sshLog = Logger(subsystem: "com.bhat.intel", category: "SSH")
 
 final class SSHSkill {
 
@@ -133,6 +138,27 @@ final class SSHSkill {
         }
     }
 
+    // MARK: - Connection test
+
+    /// Verifies that the currently saved SSH configuration can connect and
+    /// authenticate. Runs a trivial no-op command; throws if the connection,
+    /// authentication, or key parsing fails. Returns normally on success.
+    func testConnection(timeout: Double = 12) async throws {
+        let config = SSHConfigStore.shared.config
+        guard config.isConfigured else {
+            throw SSHSkillError.connectionFailed("Host, username, and private key are required.")
+        }
+        _ = try await runSSHCommand(
+            host: config.host,
+            port: config.port,
+            username: config.username,
+            privateKey: config.privateKey,
+            passphrase: config.passphrase,
+            command: "true",
+            timeout: timeout
+        )
+    }
+
     // MARK: - NIOSSH connection
 
     struct CommandResult {
@@ -149,10 +175,19 @@ final class SSHSkill {
                                command: String,
                                timeout: Double) async throws -> CommandResult {
 
+        sshLog.info("connect start host=\(host, privacy: .public):\(port, privacy: .public) user=\(username, privacy: .public) cmd=\(command, privacy: .public) timeout=\(timeout, privacy: .public)")
+
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer { try? group.syncShutdownGracefully() }
 
-        let nioKey = try parsePrivateKey(pem: privateKey, passphrase: passphrase)
+        let nioKey: NIOSSHPrivateKey
+        do {
+            nioKey = try parsePrivateKey(pem: privateKey, passphrase: passphrase)
+            sshLog.info("private key parsed OK")
+        } catch {
+            sshLog.error("private key parse FAILED: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
 
         let bootstrap = ClientBootstrap(group: group)
             .channelInitializer { channel in
@@ -174,16 +209,25 @@ final class SSHSkill {
             }
             .connectTimeout(.seconds(Int64(min(timeout, 10))))
 
-        let channel = try await bootstrap.connect(host: host, port: port).get()
+        let channel: Channel
+        do {
+            channel = try await bootstrap.connect(host: host, port: port).get()
+            sshLog.info("TCP connected; awaiting SSH handshake")
+        } catch {
+            sshLog.error("TCP connect FAILED: \(error.localizedDescription, privacy: .public)")
+            throw SSHSkillError.connectionFailed(error.localizedDescription)
+        }
 
         let result: CommandResult = try await withCheckedThrowingContinuation { continuation in
             channel.pipeline.handler(type: NIOSSHHandler.self).whenSuccess { sshHandler in
+                sshLog.info("SSH handler ready; creating session channel")
                 let promise = channel.eventLoop.makePromise(of: Channel.self)
 
                 sshHandler.createChannel(promise, channelType: .session) { childChannel, channelType in
                     guard case .session = channelType else {
                         return childChannel.eventLoop.makeFailedFuture(SSHSkillError.unexpectedChannelType)
                     }
+                    sshLog.info("session channel created; attaching exec handler")
                     let collector = SSHOutputCollector(continuation: continuation)
                     return childChannel.pipeline.addHandlers([
                         SSHExecHandler(command: command, collector: collector)
@@ -191,59 +235,198 @@ final class SSHSkill {
                 }
 
                 promise.futureResult.whenFailure { error in
+                    sshLog.error("createChannel FAILED: \(error.localizedDescription, privacy: .public)")
                     continuation.resume(throwing: error)
                 }
             }
 
             channel.pipeline.handler(type: NIOSSHHandler.self).whenFailure { error in
+                sshLog.error("SSH handshake FAILED: \(error.localizedDescription, privacy: .public)")
                 continuation.resume(throwing: error)
             }
 
             // Timeout watchdog
             channel.eventLoop.scheduleTask(in: .seconds(Int64(timeout))) {
+                sshLog.error("watchdog fired after \(timeout, privacy: .public)s — no result; timing out")
                 continuation.resume(throwing: SSHSkillError.timeout)
                 channel.close(promise: nil)
             }
         }
 
+        sshLog.info("command complete exit=\(result.exitCode, privacy: .public) stdout=\(result.stdout.count, privacy: .public)B stderr=\(result.stderr.count, privacy: .public)B")
         try? await channel.close()
         return result
     }
 
     // MARK: - Key parsing
 
+    /// Parses a private key in any of the formats users commonly paste in:
+    ///   • OpenSSH format (`-----BEGIN OPENSSH PRIVATE KEY-----`), ed25519 + ECDSA
+    ///   • SEC1 (`-----BEGIN EC PRIVATE KEY-----`), named or explicit curve params
+    ///   • PKCS#8 (`-----BEGIN PRIVATE KEY-----`), ed25519 + ECDSA
+    ///   • raw base64 ed25519 seed
+    /// For EC keys the curve is inferred from the private-scalar length, so the
+    /// curve-parameter encoding (named vs. explicit) doesn't matter.
     private func parsePrivateKey(pem: String, passphrase: String) throws -> NIOSSHPrivateKey {
         let trimmed = pem.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Try ECDSA P-256 PEM
+        // OpenSSH format has a distinctive header and a non-DER body.
+        if trimmed.contains("OPENSSH PRIVATE KEY") {
+            return try parseOpenSSHKey(pem: trimmed)
+        }
+
+        if trimmed.contains("ENCRYPTED") {
+            throw SSHSkillError.connectionFailed(
+                "Encrypted PEM keys aren't supported. Re-export the key without a passphrase.")
+        }
+
+        // Fast path: swift-crypto's native PEM parser (named-curve PKCS#8/SEC1).
         if let p256 = try? P256.Signing.PrivateKey(pemRepresentation: trimmed) {
             return NIOSSHPrivateKey(p256Key: p256)
         }
-
-        // Try P-384
         if let p384 = try? P384.Signing.PrivateKey(pemRepresentation: trimmed) {
             return NIOSSHPrivateKey(p384Key: p384)
         }
-
-        // Try P-521
         if let p521 = try? P521.Signing.PrivateKey(pemRepresentation: trimmed) {
             return NIOSSHPrivateKey(p521Key: p521)
         }
 
-        // Try Ed25519 from raw base64
-        let base64Body = Self.stripPEMHeaders(trimmed)
-        if let rawData = Data(base64Encoded: base64Body) {
-            if rawData.count == 32 {
-                let ed = try Curve25519.Signing.PrivateKey(rawRepresentation: rawData)
-                return NIOSSHPrivateKey(ed25519Key: ed)
+        // Generic DER parse: handles SEC1 (incl. explicit params) and PKCS#8.
+        let body = Self.stripPEMHeaders(trimmed)
+        if let der = Data(base64Encoded: body) {
+            if let key = try? parseDERPrivateKey(Array(der)) {
+                return key
             }
-            if rawData.count == 64 {
-                let ed = try Curve25519.Signing.PrivateKey(rawRepresentation: rawData.prefix(32))
-                return NIOSSHPrivateKey(ed25519Key: ed)
+            // Raw ed25519 seed (32) or seed||pub (64) pasted as plain base64.
+            if der.count == 32 {
+                return NIOSSHPrivateKey(ed25519Key: try Curve25519.Signing.PrivateKey(rawRepresentation: der))
+            }
+            if der.count == 64 {
+                return NIOSSHPrivateKey(ed25519Key: try Curve25519.Signing.PrivateKey(rawRepresentation: der.prefix(32)))
             }
         }
 
         throw SSHSkillError.unsupportedKeyFormat
+    }
+
+    // MARK: DER (SEC1 / PKCS#8)
+
+    private static let oidECPublicKey: [UInt8] = [0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01] // 1.2.840.10045.2.1
+    private static let oidEd25519: [UInt8] = [0x2B, 0x65, 0x70]                              // 1.3.101.112
+
+    private func parseDERPrivateKey(_ der: [UInt8]) throws -> NIOSSHPrivateKey {
+        var top = DERReader(der)
+        let seq = try top.readTLV()
+        guard seq.tag == 0x30 else { throw SSHSkillError.unsupportedKeyFormat }
+
+        var body = DERReader(seq.value)
+        let version = try body.readTLV()
+        guard version.tag == 0x02, let v = version.value.last else { throw SSHSkillError.unsupportedKeyFormat }
+
+        switch v {
+        case 1:
+            // SEC1 ECPrivateKey: version, privateKey OCTET STRING, [0] params, [1] pubkey
+            let scalar = try body.readTLV()
+            guard scalar.tag == 0x04 else { throw SSHSkillError.unsupportedKeyFormat }
+            return try Self.ecKey(fromScalar: scalar.value)
+
+        case 0:
+            // PKCS#8 PrivateKeyInfo: version, AlgorithmIdentifier, privateKey OCTET STRING
+            let alg = try body.readTLV()
+            guard alg.tag == 0x30 else { throw SSHSkillError.unsupportedKeyFormat }
+            var algReader = DERReader(alg.value)
+            let oid = try algReader.readTLV()
+            guard oid.tag == 0x06 else { throw SSHSkillError.unsupportedKeyFormat }
+
+            let priv = try body.readTLV()
+            guard priv.tag == 0x04 else { throw SSHSkillError.unsupportedKeyFormat }
+
+            if oid.value == Self.oidEd25519 {
+                // Inner OCTET STRING wraps the 32-byte seed.
+                var inner = DERReader(priv.value)
+                let seed = try inner.readTLV()
+                guard seed.tag == 0x04 else { throw SSHSkillError.unsupportedKeyFormat }
+                return NIOSSHPrivateKey(ed25519Key: try Curve25519.Signing.PrivateKey(rawRepresentation: Data(seed.value)))
+            }
+            if oid.value == Self.oidECPublicKey {
+                // Inner content is a SEC1 ECPrivateKey.
+                return try parseDERPrivateKey(priv.value)
+            }
+            throw SSHSkillError.unsupportedKeyFormat
+
+        default:
+            throw SSHSkillError.unsupportedKeyFormat
+        }
+    }
+
+    /// Builds an EC key, choosing the curve from the scalar length (32→P-256,
+    /// 48→P-384, 66→P-521) after normalizing leading-zero padding.
+    private static func ecKey(fromScalar raw: [UInt8]) throws -> NIOSSHPrivateKey {
+        let scalar = normalizeScalar(raw)
+        switch scalar.count {
+        case 32: return NIOSSHPrivateKey(p256Key: try P256.Signing.PrivateKey(rawRepresentation: Data(scalar)))
+        case 48: return NIOSSHPrivateKey(p384Key: try P384.Signing.PrivateKey(rawRepresentation: Data(scalar)))
+        case 66: return NIOSSHPrivateKey(p521Key: try P521.Signing.PrivateKey(rawRepresentation: Data(scalar)))
+        default: throw SSHSkillError.unsupportedKeyFormat
+        }
+    }
+
+    /// Strips leading zero bytes, then left-pads to the nearest valid EC scalar
+    /// length. Handles SSH mpint padding and short scalars.
+    private static func normalizeScalar(_ raw: [UInt8]) -> [UInt8] {
+        var b = raw
+        while b.count > 1 && b.first == 0 { b.removeFirst() }
+        for size in [32, 48, 66] where b.count <= size {
+            return b.count == size ? b : Array(repeating: 0, count: size - b.count) + b
+        }
+        return b
+    }
+
+    // MARK: OpenSSH format
+
+    private func parseOpenSSHKey(pem: String) throws -> NIOSSHPrivateKey {
+        guard let data = Data(base64Encoded: Self.stripPEMHeaders(pem)) else {
+            throw SSHSkillError.unsupportedKeyFormat
+        }
+        var r = SSHBufReader(Array(data))
+
+        let magic = Array("openssh-key-v1\0".utf8)
+        guard let read = r.readBytes(magic.count), read == magic else {
+            throw SSHSkillError.unsupportedKeyFormat
+        }
+
+        let cipher = try r.readString()      // ciphername
+        _ = try r.readString()               // kdfname
+        _ = try r.readString()               // kdfoptions
+        guard String(decoding: cipher, as: UTF8.self) == "none" else {
+            throw SSHSkillError.connectionFailed(
+                "Encrypted OpenSSH keys aren't supported yet. Remove the passphrase with `ssh-keygen -p -f <key>` (empty passphrase) or paste a PEM key.")
+        }
+
+        guard try r.readUInt32() == 1 else { throw SSHSkillError.unsupportedKeyFormat }
+        _ = try r.readString()               // public key blob
+
+        var priv = SSHBufReader(try r.readString())
+        _ = try priv.readUInt32()            // check int 1
+        _ = try priv.readUInt32()            // check int 2
+        let keyType = String(decoding: try priv.readString(), as: UTF8.self)
+
+        switch keyType {
+        case "ssh-ed25519":
+            _ = try priv.readString()        // public key (32 bytes)
+            let secret = try priv.readString() // 64 bytes: seed || public
+            guard secret.count >= 32 else { throw SSHSkillError.unsupportedKeyFormat }
+            return NIOSSHPrivateKey(ed25519Key: try Curve25519.Signing.PrivateKey(rawRepresentation: Data(secret.prefix(32))))
+
+        case "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521":
+            _ = try priv.readString()        // curve name
+            _ = try priv.readString()        // public point Q
+            let scalar = try priv.readString() // private scalar (mpint)
+            return try Self.ecKey(fromScalar: scalar)
+
+        default:
+            throw SSHSkillError.connectionFailed("Unsupported OpenSSH key type: \(keyType)")
+        }
     }
 
     private static func stripPEMHeaders(_ pem: String) -> String {
@@ -258,6 +441,65 @@ final class SSHSkill {
         let json = (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         return MessageStruct(role: "function", content: json, name: name)
+    }
+}
+
+// MARK: - Binary readers
+
+/// Minimal DER (ASN.1) tag-length-value reader.
+private struct DERReader {
+    private let bytes: [UInt8]
+    private var idx = 0
+
+    init(_ bytes: [UInt8]) { self.bytes = bytes }
+
+    mutating func readTLV() throws -> (tag: UInt8, value: [UInt8]) {
+        guard idx < bytes.count else { throw SSHSkillError.unsupportedKeyFormat }
+        let tag = bytes[idx]; idx += 1
+        let length = try readLength()
+        guard idx + length <= bytes.count else { throw SSHSkillError.unsupportedKeyFormat }
+        let value = Array(bytes[idx..<idx + length]); idx += length
+        return (tag, value)
+    }
+
+    private mutating func readLength() throws -> Int {
+        guard idx < bytes.count else { throw SSHSkillError.unsupportedKeyFormat }
+        let first = bytes[idx]; idx += 1
+        if first & 0x80 == 0 { return Int(first) }
+        let count = Int(first & 0x7F)
+        guard count > 0, count <= 4, idx + count <= bytes.count else { throw SSHSkillError.unsupportedKeyFormat }
+        var length = 0
+        for _ in 0..<count { length = (length << 8) | Int(bytes[idx]); idx += 1 }
+        return length
+    }
+}
+
+/// Reader for the SSH wire format (uint32-length-prefixed strings), used by
+/// the OpenSSH private-key container.
+private struct SSHBufReader {
+    private let bytes: [UInt8]
+    private var idx = 0
+
+    init(_ bytes: [UInt8]) { self.bytes = bytes }
+
+    mutating func readUInt32() throws -> UInt32 {
+        guard idx + 4 <= bytes.count else { throw SSHSkillError.unsupportedKeyFormat }
+        let value = (UInt32(bytes[idx]) << 24) | (UInt32(bytes[idx + 1]) << 16)
+            | (UInt32(bytes[idx + 2]) << 8) | UInt32(bytes[idx + 3])
+        idx += 4
+        return value
+    }
+
+    mutating func readBytes(_ count: Int) -> [UInt8]? {
+        guard idx + count <= bytes.count else { return nil }
+        let value = Array(bytes[idx..<idx + count]); idx += count
+        return value
+    }
+
+    mutating func readString() throws -> [UInt8] {
+        let length = Int(try readUInt32())
+        guard let value = readBytes(length) else { throw SSHSkillError.unsupportedKeyFormat }
+        return value
     }
 }
 
@@ -299,12 +541,14 @@ private final class SSHPrivateKeyAuthDelegate: NIOSSHClientUserAuthenticationDel
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     ) {
         if availableMethods.contains(.publicKey) {
+            sshLog.info("auth: offering publickey for user=\(self.username, privacy: .public)")
             nextChallengePromise.succeed(.init(
                 username: username,
                 serviceName: "ssh-connection",
                 offer: .privateKey(.init(privateKey: privateKey))
             ))
         } else {
+            sshLog.error("auth: server does not offer publickey method; giving up")
             nextChallengePromise.succeed(nil)
         }
     }
@@ -312,6 +556,7 @@ private final class SSHPrivateKeyAuthDelegate: NIOSSHClientUserAuthenticationDel
 
 private final class SSHAcceptAllHostKeysDelegate: NIOSSHClientServerAuthenticationDelegate {
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
+        sshLog.info("hostkey: accepting (no verification)")
         validationCompletePromise.succeed(())
     }
 }
@@ -328,7 +573,12 @@ private final class SSHExecHandler: ChannelDuplexHandler {
     typealias OutboundOut = SSHChannelData
 
     private let command: String
-    private weak var collector: SSHOutputCollector?
+    // Strong reference: the collector has no other owner once the channel
+    // setup closure returns. Holding it `weak` would deallocate it immediately,
+    // so `complete()` would never resume the continuation and every command
+    // would hang until the watchdog timeout. There is no retain cycle — the
+    // collector does not reference this handler.
+    private let collector: SSHOutputCollector
 
     init(command: String, collector: SSHOutputCollector) {
         self.command = command
@@ -336,6 +586,7 @@ private final class SSHExecHandler: ChannelDuplexHandler {
     }
 
     func channelActive(context: ChannelHandlerContext) {
+        sshLog.info("exec: channel active; sending exec request")
         let execRequest = SSHChannelRequestEvent.ExecRequest(command: command, wantReply: true)
         context.triggerUserOutboundEvent(execRequest, promise: nil)
     }
@@ -346,9 +597,9 @@ private final class SSHExecHandler: ChannelDuplexHandler {
 
         switch channelData.type {
         case .channel:
-            collector?.appendStdout(bytes)
+            collector.appendStdout(bytes)
         case .stdErr:
-            collector?.appendStderr(bytes)
+            collector.appendStderr(bytes)
         default:
             break
         }
@@ -356,18 +607,20 @@ private final class SSHExecHandler: ChannelDuplexHandler {
 
     func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
         if let status = event as? SSHChannelRequestEvent.ExitStatus {
-            collector?.setExitCode(status.exitStatus)
+            sshLog.info("exec: received exit status \(status.exitStatus, privacy: .public)")
+            collector.setExitCode(status.exitStatus)
         }
         context.fireUserInboundEventTriggered(event)
     }
 
     func channelInactive(context: ChannelHandlerContext) {
-        collector?.complete()
+        sshLog.info("exec: channel inactive")
+        collector.complete()
         context.fireChannelInactive()
     }
 
     func handlerRemoved(context: ChannelHandlerContext) {
-        collector?.complete()
+        collector.complete()
     }
 }
 
