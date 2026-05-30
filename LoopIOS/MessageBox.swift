@@ -108,8 +108,22 @@ class MessageBox: UIView {
     private static let longPressThreshold: TimeInterval = 0.6
     /// True while the user is holding the mic button in long-press-to-record mode.
     private(set) var isLongPressRecording = false
-    /// "Release to send" tooltip shown above the mic button during long-press recording.
+    /// "Release to send" pill shown above the mic button during long-press recording.
+    /// The label sits inside a tinted container so the affordance reads as a pill
+    /// rather than free-floating text; the container is left-aligned with the mic
+    /// button so the longest English string ("Release to send") cannot run off
+    /// the leading edge of the screen.
+    private let releaseToSendPill = UIView()
     private let releaseToSendLabel = UILabel()
+
+    /// Pre-armed feedback generators — kept alive for the lifetime of the view
+    /// so the *first* impact has the same low latency as subsequent ones.
+    /// `light` fires on finger-down (immediate tactile ack), `heavy` fires when
+    /// the long-press threshold is crossed and recording starts, and `medium`
+    /// fires on release to confirm "sent".
+    private let lightFeedback = UIImpactFeedbackGenerator(style: .light)
+    private let mediumFeedback = UIImpactFeedbackGenerator(style: .medium)
+    private let heavyFeedback = UIImpactFeedbackGenerator(style: .heavy)
 
     private static var deepgramAPIKey: String? {
         return KeyStore.shared.value(for: .deepgram)
@@ -341,6 +355,11 @@ class MessageBox: UIView {
         micButton.backgroundColor = UIColor.systemGray6
         micButton.layer.cornerRadius = 25
         micButton.layer.borderWidth = 0
+        // Touch-down fires the moment the finger lands — independent of whether
+        // the press becomes a tap or a long-press. UIControl events coexist with
+        // attached gesture recognizers, so this gives the user immediate tactile
+        // feedback (light tap) without interfering with the tap/long-press logic.
+        micButton.addTarget(self, action: #selector(handleMicTouchDown), for: .touchDown)
         let micTapGesture = UITapGestureRecognizer(target: self, action: #selector(micButtonTapped))
         let micLongPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleMicLongPress(_:)))
         micLongPressGesture.minimumPressDuration = MessageBox.longPressThreshold
@@ -380,17 +399,31 @@ class MessageBox: UIView {
         emptyLabel.textColor = .secondaryLabel
         emptyLabel.font = UIFont.preferredFont(forTextStyle: .body)
 
-        // "Release to send" label — hidden by default, shown during long-press recording.
+        // "Release to send" pill — hidden by default, shown during long-press
+        // recording. Sits above the mic button, left-aligned with it (NOT
+        // centered) so longer English strings can't run off the leading edge.
+        releaseToSendPill.backgroundColor = UIColor.label.withAlphaComponent(0.88)
+        releaseToSendPill.layer.cornerRadius = 13
+        releaseToSendPill.layer.cornerCurve = .continuous
+        releaseToSendPill.isHidden = true
+        releaseToSendPill.translatesAutoresizingMaskIntoConstraints = false
+        self.addSubview(releaseToSendPill)
+
         releaseToSendLabel.text = "Release to send"
-        releaseToSendLabel.textColor = .secondaryLabel
-        releaseToSendLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
+        releaseToSendLabel.textColor = .systemBackground
+        releaseToSendLabel.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
         releaseToSendLabel.textAlignment = .center
-        releaseToSendLabel.isHidden = true
         releaseToSendLabel.translatesAutoresizingMaskIntoConstraints = false
-        self.addSubview(releaseToSendLabel)
+        releaseToSendPill.addSubview(releaseToSendLabel)
+
         NSLayoutConstraint.activate([
-            releaseToSendLabel.centerXAnchor.constraint(equalTo: micButton.centerXAnchor),
-            releaseToSendLabel.bottomAnchor.constraint(equalTo: micButton.topAnchor, constant: -4)
+            releaseToSendPill.leadingAnchor.constraint(equalTo: micButton.leadingAnchor),
+            releaseToSendPill.bottomAnchor.constraint(equalTo: micButton.topAnchor, constant: -8),
+            releaseToSendPill.heightAnchor.constraint(equalToConstant: 26),
+
+            releaseToSendLabel.leadingAnchor.constraint(equalTo: releaseToSendPill.leadingAnchor, constant: 12),
+            releaseToSendLabel.trailingAnchor.constraint(equalTo: releaseToSendPill.trailingAnchor, constant: -12),
+            releaseToSendLabel.centerYAnchor.constraint(equalTo: releaseToSendPill.centerYAnchor)
         ])
 
         // Initial state: nothing typed, nothing staged → paperclip showing.
@@ -608,7 +641,7 @@ class MessageBox: UIView {
 
         if isLongPressRecording {
             startMicPulseAnimation()
-            releaseToSendLabel.isHidden = false
+            showReleaseToSendPill()
         }
     }
 
@@ -646,7 +679,7 @@ class MessageBox: UIView {
         // Clean up long-press recording state
         isLongPressRecording = false
         stopMicPulseAnimation()
-        releaseToSendLabel.isHidden = true
+        hideReleaseToSendPill()
 
         // Reset waveform bars back to their idle baseline. The container's
         // fill no longer changes during recording/transcribing, so there's
@@ -664,6 +697,17 @@ class MessageBox: UIView {
         let coord = VoiceLoopCoordinator.shared
         if coord.state == .recording || coord.state == .transcribing {
             coord.setState(.idle)
+        }
+
+        // Audio session is deactivated *here* (not in stopRecording) so the
+        // listenSend earcon scheduled by switchToTranscribingState gets a
+        // chance to play through. setActive(false) on an already-inactive
+        // session is a no-op / harmless throw — the streaming path already
+        // deactivates inside teardownStreaming.
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        } catch {
+            // best-effort
         }
     }
     
@@ -712,22 +756,20 @@ class MessageBox: UIView {
         }
 
         // Setup audio session to allow background audio to continue playing
+        // and earcons to be audible.
+        //
+        // We intentionally use `.default` mode (NOT `.measurement`). `.measurement`
+        // strips signal processing AND attenuates output level system-wide, which
+        // makes the listenStart / listenSend earcons inaudible while recording is
+        // active. `.defaultToSpeaker` routes output to the loudspeaker when no
+        // headphones are connected, matching what users expect for a voice flow.
         let audioSession = AVAudioSession.sharedInstance()
         do {
-            // Use playAndRecord category with mixWithOthers option to allow background audio
-            try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.mixWithOthers, .allowBluetooth])
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .allowBluetooth, .defaultToSpeaker])
             try audioSession.setActive(true)
-            print("Audio session setup successful with playAndRecord + mixWithOthers")
         } catch {
-            // Fallback to default mode if measurement fails
-            do {
-                try audioSession.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .allowBluetooth])
-                try audioSession.setActive(true)
-                print("Using fallback audio session mode with playAndRecord + mixWithOthers")
-            } catch {
-                print("Failed to setup audio session: \(error)")
-                return
-            }
+            print("Failed to setup audio session: \(error)")
+            return
         }
         
         // Setup recording URL
@@ -807,19 +849,16 @@ class MessageBox: UIView {
         recordingTimer = nil
         
         recorder.stop()
-        
+
         // Get recording duration for debugging
         let recordingDuration = Date().timeIntervalSince(recordingStartTime ?? Date())
         print("Recording stopped. Duration: \(recordingDuration)s")
-        
+
         audioRecorder = nil
-        
-        // Deactivate audio session with options to allow other audio to continue
-        do {
-            try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
-        } catch {
-            print("Failed to deactivate audio session: \(error)")
-        }
+
+        // Audio session deactivation lives in returnToNormalState() now —
+        // deactivating here would silence the listenSend earcon that
+        // switchToTranscribingState() plays immediately after this returns.
     }
     
     // MARK: - Waveform Animation
@@ -1042,6 +1081,16 @@ class MessageBox: UIView {
 
     // MARK: - Long-Press-to-Record
 
+    /// Touch-down on the mic button. Fires the moment the finger lands so the
+    /// user feels an immediate ack — even before the 0.6s long-press window
+    /// has elapsed. Also pre-warms the heavier generators so the next two
+    /// taps (start-recording, release-to-send) keep the same low latency.
+    @objc private func handleMicTouchDown() {
+        lightFeedback.impactOccurred()
+        mediumFeedback.prepare()
+        heavyFeedback.prepare()
+    }
+
     @objc private func handleMicLongPress(_ gesture: UILongPressGestureRecognizer) {
         switch gesture.state {
         case .began:
@@ -1056,12 +1105,16 @@ class MessageBox: UIView {
             }
 
             isLongPressRecording = true
-            let feedback = UIImpactFeedbackGenerator(style: .heavy)
-            feedback.impactOccurred()
+            // Heavier tap punctuates "you are now recording" — distinct from
+            // the lighter touch-down ack a moment earlier.
+            heavyFeedback.impactOccurred()
             startRecording()
 
         case .ended:
             guard isLongPressRecording else { return }
+            // Confirm the send with a medium-weight tap so release feels
+            // committed rather than ambiguous.
+            mediumFeedback.impactOccurred()
             finishLongPressRecording()
 
         case .cancelled, .failed:
@@ -1075,7 +1128,7 @@ class MessageBox: UIView {
 
     private func finishLongPressRecording() {
         stopMicPulseAnimation()
-        releaseToSendLabel.isHidden = true
+        hideReleaseToSendPill()
         isLongPressRecording = false
         guard currentState == .recording else { return }
         recordingSendButtonTapped()
@@ -1083,7 +1136,7 @@ class MessageBox: UIView {
 
     private func cancelLongPressRecording() {
         stopMicPulseAnimation()
-        releaseToSendLabel.isHidden = true
+        hideReleaseToSendPill()
         isLongPressRecording = false
         if currentState == .recording {
             if isStreamingSTT { teardownStreaming() }
@@ -1103,6 +1156,24 @@ class MessageBox: UIView {
     private func stopMicPulseAnimation() {
         micButton.layer.removeAllAnimations()
         micButton.transform = .identity
+    }
+
+    /// Fade + slight rise-in of the "Release to send" pill. Keeps the affordance
+    /// from popping abruptly when the long-press threshold trips.
+    private func showReleaseToSendPill() {
+        releaseToSendPill.isHidden = false
+        releaseToSendPill.alpha = 0
+        releaseToSendPill.transform = CGAffineTransform(translationX: 0, y: 4)
+        UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+            self.releaseToSendPill.alpha = 1
+            self.releaseToSendPill.transform = .identity
+        }
+    }
+
+    private func hideReleaseToSendPill() {
+        releaseToSendPill.isHidden = true
+        releaseToSendPill.alpha = 0
+        releaseToSendPill.transform = .identity
     }
 
 }
@@ -1233,18 +1304,17 @@ extension MessageBox {
     fileprivate func beginStreamingRecording() -> Bool {
         guard let apiKey = MessageBox.deepgramAPIKey else { return false }
 
+        // See the matching comment in startRecording(): `.measurement` mode
+        // attenuates output and would silence earcons. `.default` +
+        // `.defaultToSpeaker` keeps both Deepgram capture quality and earcon
+        // playback audible.
         let audioSession = AVAudioSession.sharedInstance()
         do {
-            try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.mixWithOthers, .allowBluetooth])
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .allowBluetooth, .defaultToSpeaker])
             try audioSession.setActive(true)
         } catch {
-            do {
-                try audioSession.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .allowBluetooth])
-                try audioSession.setActive(true)
-            } catch {
-                print("Streaming STT: audio session failed (\(error)) — falling back to AVAudioRecorder")
-                return false
-            }
+            print("Streaming STT: audio session failed (\(error)) — falling back to AVAudioRecorder")
+            return false
         }
 
         let engine = AVAudioEngine()

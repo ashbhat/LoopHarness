@@ -104,11 +104,11 @@ final class EarconPlayer {
             Segment(freqs: [440.00], duration: 0.20, volume: 0.10),
         ])
         buffers[.listenStart] = synthesize([
-            Segment(freqs: [659.25], duration: 0.07, volume: 0.10),
+            Segment(freqs: [659.25], duration: 0.07, volume: 0.20),
         ])
         buffers[.listenSend]  = synthesize([
-            Segment(freqs: [523.25], duration: 0.06, volume: 0.10),
-            Segment(freqs: [392.00], duration: 0.10, volume: 0.10),
+            Segment(freqs: [523.25], duration: 0.06, volume: 0.20),
+            Segment(freqs: [392.00], duration: 0.10, volume: 0.20),
         ])
         buffers[.interrupt]   = synthesize([
             Segment(freqs: [329.63], duration: 0.06, volume: 0.12),
