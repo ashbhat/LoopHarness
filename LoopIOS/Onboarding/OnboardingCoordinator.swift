@@ -152,14 +152,6 @@ final class OnboardingCoordinator {
     /// callbacks synchronously.
     private var isAdvancing = false
 
-    /// True between firing `extractName(...)` for the `.askName` step and that
-    /// extraction's completion landing. Used to swallow follow-up messages the
-    /// user sends while the model is still resolving the first reply — without
-    /// this guard, a second send races the first and overwrites the name
-    /// (e.g. user types "Loop", then impatiently types "did that work?"; the
-    /// second message would otherwise become the assistant's name).
-    private var isExtractingName = false
-
     private init() {}
 
     // MARK: - Public entry points
@@ -279,34 +271,11 @@ final class OnboardingCoordinator {
             }
 
         case .askName:
-            // Naming is now the final step before .done. Run the user's
-            // freeform reply through the LLM so phrases like "Let's call you
-            // Buddy" or "How about Loop?" resolve to just the name. The
-            // model was already set up in step 1, so a single short prompt
-            // here is cheap and honors the user's provider pick.
-            //
-            // If an extraction is already in flight, echo the user's message
-            // so they can see it was received but skip kicking off a second
-            // resolution — the first reply still wins and gets to name the
-            // assistant. Without this, an impatient follow-up ("did that
-            // work?") races the first call and the late completion clobbers
-            // the chosen name + re-posts the greeting.
-            if isExtractingName {
-                echoUser(trimmed)
-                return true
-            }
-            commitAnswer(echo: trimmed)
-            isExtractingName = true
-            extractName(from: trimmed) { [weak self] name in
-                guard let self = self else { return }
-                self.isExtractingName = false
-                // Belt-and-suspenders: if anything else has already advanced
-                // us past .askName (e.g. a chip tap raced the model reply),
-                // don't overwrite the name or re-fire `.done` from here.
-                guard self.currentStep == .askName else { return }
-                OnboardingState.assistantName = name
-                self.advance(to: .done)
-            }
+            // Deprecated step — onboarding no longer asks the user to name the
+            // assistant. Kept in the enum so persisted `lastStep` raw values
+            // stay stable; if a user resumes mid-update at this step, just
+            // finish onboarding rather than re-prompting for a name.
+            advance(to: .done)
 
         case .keyPaste:
             if lower == "skip" {
@@ -388,7 +357,7 @@ final class OnboardingCoordinator {
             if lower == "skip" || lower.contains("later") || lower.contains("done") {
                 OnboardingState.actionButtonSkipped = true
                 commitAnswer(echo: "Skip for now")
-                advance(to: .askName)
+                advance(to: .done)
             } else {
                 echoUser(trimmed)
             }
@@ -419,7 +388,7 @@ final class OnboardingCoordinator {
         case .actionButtonSkip:
             OnboardingState.actionButtonSkipped = true
             commitAnswer(echo: "Skip for now")
-            advance(to: .askName)
+            advance(to: .done)
         }
     }
 
@@ -540,10 +509,9 @@ final class OnboardingCoordinator {
         OnboardingState.actionButtonBound = true
         guard !OnboardingState.isComplete, currentStep == .actionButton else { return false }
         commitAnswer(echo: "Pressed Action Button")
-        // The press proved the binding works — but we still want a name
-        // before chatting starts. Hop to `.askName`; it advances to `.done`
-        // after the user replies.
-        advance(to: .askName)
+        // The press proved the binding works — that's the last onboarding
+        // step, so hand straight off to the sign-off.
+        advance(to: .done)
         return true
     }
 
@@ -562,13 +530,13 @@ final class OnboardingCoordinator {
     // MARK: - State machine
 
     private func advance(to step: StepID) {
-        // Platforms without an Action Button skip that whole step but still
-        // need to ask the user what to call the assistant. The Mac and Vision
-        // hosts set `skipActionButtonStep = true`; iOS leaves it false so the
-        // walkthrough still appears (and routes to `.askName` itself when the
+        // Platforms without an Action Button skip that whole step and go
+        // straight to the sign-off. The Mac and Vision hosts set
+        // `skipActionButtonStep = true`; iOS leaves it false so the
+        // walkthrough still appears (and routes to `.done` itself when the
         // user skips it). Done here (not at each call site) so all the
         // existing `advance(to: .actionButton)` paths route through one place.
-        let actualStep: StepID = (step == .actionButton && skipActionButtonStep) ? .askName : step
+        let actualStep: StepID = (step == .actionButton && skipActionButtonStep) ? .done : step
         currentStep = actualStep
         post(actualStep)
         // `.done` is the final step — there's no chip and no follow-up
@@ -603,12 +571,6 @@ final class OnboardingCoordinator {
         let message = makeMessage(for: step)
         lastPostedMessageId = message.id
         host?.onboardingPostMessage(message)
-        // Focus the bar on the name step — it's the only open-text prompt
-        // left in the flow. The greeting + model picks have chips, so the
-        // user can tap; raising the keyboard there would just cover them.
-        if step == .askName {
-            host?.onboardingFocusMessageBox()
-        }
     }
 
     /// Mark the last posted bubble as answered (chips collapse) AND append
@@ -685,10 +647,10 @@ final class OnboardingCoordinator {
                 card: .suggestions(options: chips))
 
         case .askName:
-            // Final step — collected after the model + integrations + voice
-            // are set up so the user has a working assistant to name.
+            // Deprecated step (see the `.askName` handler). Mirror the `.done`
+            // sign-off so a resumed render never shows the old name prompt.
             return assistantMessage(
-                text: "Awesome. We're all set! I'm excited to be at your service. **What would you like to call me?**",
+                text: "Awesome. We're all set! I'm excited to be at your service. **How can I be helpful?**",
                 card: .answered)
 
         case .keyPaste:
@@ -735,13 +697,12 @@ final class OnboardingCoordinator {
                 card: .actionButtonWalkthrough)
 
         case .done:
-            // `assistantName` was just set by the .askName step. Greet the
-            // user by name so the transition into the real chat feels
-            // intentional. No chip — the message bar is the obvious next
-            // step.
-            let name = OnboardingState.assistantName
+            // Terminal message. We no longer ask the user to name the
+            // assistant, so this is the single sign-off that hands the
+            // conversation over to the real chat. No chip — the message bar
+            // is the obvious next step.
             return assistantMessage(
-                text: "Great to meet you. I'll go by **\(name)**. **Ask me anything.**",
+                text: "Awesome. We're all set! I'm excited to be at your service. **How can I be helpful?**",
                 card: .answered)
         }
     }
@@ -801,35 +762,6 @@ final class OnboardingCoordinator {
     }
 
     // MARK: - Name extraction
-
-    /// Ask the user's chosen LLM to pull just the assistant name out of a
-    /// freeform reply (e.g. "Let's call you Loop" → "Loop"). Falls back to
-    /// the raw user input on any error or empty response so the user is
-    /// never blocked by a bad model turn. Always calls `completion` on the
-    /// main thread.
-    private func extractName(from userInput: String, completion: @escaping (String) -> Void) {
-        let system = MessageStruct(role: "system",
-            content: """
-            You extract the name the user wants to call their AI assistant from a single message.
-            Reply with ONLY the name — no greeting, no quotes, no punctuation, no explanation.
-            If the user does not propose a name, reply with exactly: Loop
-            Examples:
-              User: "Loop" -> Loop
-              User: "Let's call you Buddy" -> Buddy
-              User: "How about Sage?" -> Sage
-              User: "I think I want to name you Atlas" -> Atlas
-            """)
-        let user = MessageStruct(role: "user", content: userInput)
-
-        // Pass `tools: []` so the harness doesn't inject its full tool
-        // schema for this tiny utility call — saves tokens and dodges any
-        // accidental tool-use round trips.
-        Cloud.connection.chat(messages: [system, user], tools: []) { response, _ in
-            let raw = response?.content ?? ""
-            let cleaned = Self.sanitizeExtractedName(raw, fallback: userInput)
-            DispatchQueue.main.async { completion(cleaned) }
-        }
-    }
 
     /// Tighten the LLM's reply down to a single short token suitable for a
     /// name field. Strips quotes, takes the first line, caps the length, and

@@ -2,16 +2,14 @@
 //  BundledSkillSeeds.swift
 //  Loop
 //
-//  Seeds the Workspace/Skills folder with starter skills on first launch so
-//  the user can run a real, working hot-loaded skill immediately. Without
-//  this, the spec's "create a skill that summarizes Polymarket" user story
-//  would require the user (or model) to author the JS by hand before there's
-//  any proof the runtime works.
+//  Seeds the Workspace/Skills folder with starter skills on first launch.
 //
-//  We don't ship .js files as bundle resources — instead the seed source is a
-//  Swift string literal here, written into the workspace on first launch.
+//  We don't ship .js files as bundle resources — instead each seed's source is
+//  a Swift string literal here, written into the workspace on first launch.
 //  Keeps the file layout in the Xcode project trivial and avoids resource-
 //  copy build phases.
+//
+//  Add a starter skill by appending a `Seed` to `all`.
 //
 
 import Foundation
@@ -19,8 +17,7 @@ import Foundation
 enum BundledSkillSeeds {
 
     /// One bundled skill: name, manifest description + parameter schema,
-    /// and the literal JS source. Add new entries here to ship more
-    /// starters.
+    /// and the literal JS source. Add new entries to `all` to ship starters.
     struct Seed {
         let name: String
         let description: String

@@ -47,7 +47,7 @@ final class SettingsVC: UIViewController {
                 settings.navigationController?.pushViewController(KeysVC(), animated: true)
             },
             Row(title: "SSH", icon: "terminal") { settings in
-                settings.navigationController?.pushViewController(SSHSettingsVC(), animated: true)
+                settings.navigationController?.pushViewController(SSHConnectionsVC(), animated: true)
             },
             Row(title: "Runners", icon: "server.rack") { settings in
                 settings.navigationController?.pushViewController(RunnersListVC(), animated: true)

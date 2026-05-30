@@ -244,7 +244,7 @@ can rerun them at any time.
                       completion: @escaping (Result<Any, Error>) -> Void) {
 
         let skillName = skill.name
-        let dispatcher: JSRuntime.SkillDispatcher = { [weak self] targetName, targetArgs, depth, cb in
+        let dispatcher: JSRuntime.SkillCompositionDispatcher = { [weak self] targetName, targetArgs, depth, cb in
             guard let self = self else {
                 cb(.failure(JSRuntimeError.scriptError("Registry deallocated")))
                 return

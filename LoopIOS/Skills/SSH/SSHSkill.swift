@@ -144,7 +144,12 @@ final class SSHSkill {
     /// authenticate. Runs a trivial no-op command; throws if the connection,
     /// authentication, or key parsing fails. Returns normally on success.
     func testConnection(timeout: Double = 12) async throws {
-        let config = SSHConfigStore.shared.config
+        try await testConnection(SSHConfigStore.shared.config, timeout: timeout)
+    }
+
+    /// Verifies a specific configuration (used by the connection editor, which
+    /// tests the connection being edited rather than the saved default).
+    func testConnection(_ config: SSHConfig, timeout: Double = 12) async throws {
         guard config.isConfigured else {
             throw SSHSkillError.connectionFailed("Host, username, and private key are required.")
         }
