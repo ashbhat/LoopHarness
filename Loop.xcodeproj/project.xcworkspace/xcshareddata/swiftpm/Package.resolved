@@ -1,5 +1,5 @@
 {
-  "originHash" : "591ada5808d4779c0a15641a672c42447a691b5f79905c4ec18358af894c73c1",
+  "originHash" : "1cf24112c43ca282f74e9bee33293c91f9fe480fdd5774517b4d6178244b0066",
   "pins" : [
     {
       "identity" : "libgit2",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "52287b0914f300f916b58fec80e13d8dd8f6824f",
         "version" : "1.9.2"
+      }
+    },
+    {
+      "identity" : "swift-argument-parser",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-argument-parser",
+      "state" : {
+        "revision" : "ca37474853a4b5f59a22c74bfdd449b1f6bc4cc2",
+        "version" : "1.8.1"
       }
     },
     {
@@ -80,6 +89,15 @@
       "state" : {
         "revision" : "fcfb71e3dcbbaa70d120b98b7477ce173074aec3",
         "version" : "0.4.0"
+      }
+    },
+    {
+      "identity" : "swiftterm",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/migueldeicaza/SwiftTerm.git",
+      "state" : {
+        "revision" : "8e7a1e154f470e19c709a00a8768df348ba5fc43",
+        "version" : "1.13.0"
       }
     }
   ],

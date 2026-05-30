@@ -14,6 +14,7 @@
 		DA17C13000000000000000B4 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = DA17C13000000000000000A4 /* NIOSSH */; };
 		DA17C13000000000000000B5 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = DA17C13000000000000000A5 /* NIOSSH */; };
 		DA17C13000000000000000B6 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = DA17C13000000000000000A6 /* NIOSSH */; };
+		DA17C14000000000000000D4 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = DA17C14000000000000000C4 /* SwiftTerm */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -93,10 +94,14 @@
 				Settings/KeyEditVC.swift,
 				Settings/KeysVC.swift,
 				Settings/ModelPickerVC.swift,
-				Settings/SSHSettingsVC.swift,
 				Settings/SettingsVC.swift,
 				Settings/SkillsVC.swift,
+				Settings/SSHSettingsVC.swift,
 				SideDrawerViewController.swift,
+				Skills/SSH/SSHCommandPaletteViewController.swift,
+				Skills/SSH/SSHTerminalAccessoryView.swift,
+				Skills/SSH/SSHTerminalTheme.swift,
+				Skills/SSH/SSHTerminalViewController.swift,
 				SpeechPipeline/EarconPlayer.swift,
 				SpeechPipeline/VoiceLoopCoordinator.swift,
 				TriggerIntent.swift,
@@ -132,10 +137,14 @@
 				Settings/KeyEditVC.swift,
 				Settings/KeysVC.swift,
 				Settings/ModelPickerVC.swift,
-				Settings/SSHSettingsVC.swift,
 				Settings/SettingsVC.swift,
 				Settings/SkillsVC.swift,
+				Settings/SSHSettingsVC.swift,
 				SideDrawerViewController.swift,
+				Skills/SSH/SSHCommandPaletteViewController.swift,
+				Skills/SSH/SSHTerminalAccessoryView.swift,
+				Skills/SSH/SSHTerminalTheme.swift,
+				Skills/SSH/SSHTerminalViewController.swift,
 				TriggerIntent.swift,
 			);
 			target = 6C00020A00000000DEADBEEF /* LoopVision */;
@@ -193,6 +202,7 @@
 			files = (
 				DA17C12F00000000000000F2 /* SwiftGitX in Frameworks */,
 				DA17C13000000000000000B4 /* NIOSSH in Frameworks */,
+				DA17C14000000000000000D4 /* SwiftTerm in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -286,6 +296,7 @@
 			packageProductDependencies = (
 				DA17C12F00000000000000F4 /* SwiftGitX */,
 				DA17C13000000000000000A4 /* NIOSSH */,
+				DA17C14000000000000000C4 /* SwiftTerm */,
 			);
 			productName = Loop;
 			productReference = 6A0903832CD69D9500E70D46 /* Loop.app */;
@@ -377,6 +388,7 @@
 			packageReferences = (
 				DA17C12F00000000000000F1 /* XCRemoteSwiftPackageReference "SwiftGitX" */,
 				DA17C13000000000000000A1 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */,
+				DA17C14000000000000000C1 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6A0903842CD69D9500E70D46 /* Products */;
@@ -962,6 +974,14 @@
 				minimumVersion = 0.9.0;
 			};
 		};
+		DA17C14000000000000000C1 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.13.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -994,6 +1014,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = DA17C13000000000000000A1 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */;
 			productName = NIOSSH;
+		};
+		DA17C14000000000000000C4 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DA17C14000000000000000C1 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
