@@ -25,6 +25,15 @@ struct RunnerConfig: Codable, Identifiable, Equatable {
     var createdAt: Date
     var lastPollTime: Date?
     var lastSeenTurnCount: Int
+    /// When set, the runner is reached by tunnelling over the SSH host
+    /// configured in Settings → SSH (transport hits `127.0.0.1:<port>` on that
+    /// host) rather than by hitting `baseURL` directly over HTTP. `nil` keeps
+    /// the original direct-URL behaviour. Optional so existing persisted
+    /// runners decode unchanged.
+    var sshRemotePort: Int?
+
+    /// True when this runner polls over the SSH host instead of a direct URL.
+    var usesSSH: Bool { sshRemotePort != nil }
 
     init(id: String = UUID().uuidString,
          nickname: String,
@@ -32,7 +41,8 @@ struct RunnerConfig: Codable, Identifiable, Equatable {
          secretRef: String? = nil,
          createdAt: Date = Date(),
          lastPollTime: Date? = nil,
-         lastSeenTurnCount: Int = 0) {
+         lastSeenTurnCount: Int = 0,
+         sshRemotePort: Int? = nil) {
         self.id = id
         self.nickname = nickname
         self.baseURL = baseURL
@@ -40,6 +50,7 @@ struct RunnerConfig: Codable, Identifiable, Equatable {
         self.createdAt = createdAt
         self.lastPollTime = lastPollTime
         self.lastSeenTurnCount = lastSeenTurnCount
+        self.sshRemotePort = sshRemotePort
     }
 }
 
@@ -112,7 +123,24 @@ struct RunnerJobsResponse: Codable {
     }
 }
 
-/// Health-check response from `GET /health`.
+/// Health-check response from `GET /health`. The runner returns
+/// `{"ok":true,"version":"0.1.0","uptime_seconds":N}`.
 struct RunnerHealthResponse: Codable {
-    let status: String
+    let ok: Bool
+    let version: String?
+    let uptimeSeconds: Double?
+
+    /// Human-readable summary for the Test Connection UI.
+    var summary: String {
+        var parts = [ok ? "ok" : "not ok"]
+        if let version { parts.append("v\(version)") }
+        if let uptimeSeconds { parts.append("up \(Int(uptimeSeconds))s") }
+        return parts.joined(separator: " · ")
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case version
+        case uptimeSeconds = "uptime_seconds"
+    }
 }

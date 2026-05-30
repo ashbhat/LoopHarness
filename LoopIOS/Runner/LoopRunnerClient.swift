@@ -156,15 +156,31 @@ enum RunnerError: Error, LocalizedError {
     case invalidResponse
     case httpError(statusCode: Int)
     case missingSecret
+    /// SSH/transport-level failure (e.g. curl couldn't reach the runner, or
+    /// the SSH command itself failed). Carries a human-readable detail.
+    case transport(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidResponse: return "Invalid response from runner"
         case .httpError(let code): return "Runner returned HTTP \(code)"
         case .missingSecret: return "Shared secret not configured"
+        case .transport(let detail): return detail
         }
     }
 }
+
+// MARK: - Transport abstraction
+
+/// The polling surface the Runner poller depends on. Implemented by the direct
+/// HTTP client (`LoopRunnerClient`) and the SSH exec client
+/// (`LoopRunnerSSHClient`) so the poller is transport-agnostic.
+protocol RunnerPolling {
+    func pollTurns(since: Date) async throws -> (turns: [RunnerTurn], serverTime: Date)
+    func pollJobs(since: Date) async throws -> (jobs: [RunnerJob], serverTime: Date)
+}
+
+extension LoopRunnerClient: RunnerPolling {}
 
 // MARK: - ISO8601 helpers
 

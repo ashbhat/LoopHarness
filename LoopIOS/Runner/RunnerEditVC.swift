@@ -29,6 +29,13 @@ final class RunnerEditVC: UIViewController {
     private let testButton = UIButton(type: .system)
     private let statusLabel = UILabel()
 
+    // SSH-transport controls.
+    private let urlLabel = UILabel()
+    private let portLabel = UILabel()
+    private let portField = UITextField()
+    private let sshSwitch = UISwitch()
+    private let sshHintLabel = UILabel()
+
     init(runner: RunnerConfig?) {
         self.runner = runner
         self.isNew = runner == nil
@@ -76,12 +83,38 @@ final class RunnerEditVC: UIViewController {
         configureField(nicknameField, placeholder: "My Runner VM", text: runner?.nickname)
         stack.addArrangedSubview(nicknameField)
 
-        stack.addArrangedSubview(makeLabel("Base URL"))
+        // Transport toggle — poll over the Settings → SSH host instead of a URL.
+        let sshRow = UIStackView()
+        sshRow.axis = .horizontal
+        sshRow.alignment = .center
+        sshRow.addArrangedSubview(makeLabel("Connect via SSH host"))
+        sshRow.addArrangedSubview(sshSwitch)
+        sshSwitch.addTarget(self, action: #selector(sshSwitchChanged), for: .valueChanged)
+        stack.addArrangedSubview(sshRow)
+
+        sshHintLabel.font = .preferredFont(forTextStyle: .caption1)
+        sshHintLabel.textColor = .secondaryLabel
+        sshHintLabel.numberOfLines = 0
+        sshHintLabel.text = "Polls the runner at 127.0.0.1:<port> on your Settings → SSH host over SSH. No public URL needed."
+        stack.addArrangedSubview(sshHintLabel)
+
+        urlLabel.text = "Base URL"
+        urlLabel.font = .preferredFont(forTextStyle: .subheadline)
+        urlLabel.textColor = .secondaryLabel
+        stack.addArrangedSubview(urlLabel)
         configureField(urlField, placeholder: "https://my-vm.example.com:8080", text: runner?.baseURL)
         urlField.keyboardType = .URL
         urlField.autocapitalizationType = .none
         urlField.autocorrectionType = .no
         stack.addArrangedSubview(urlField)
+
+        portLabel.text = "Remote port"
+        portLabel.font = .preferredFont(forTextStyle: .subheadline)
+        portLabel.textColor = .secondaryLabel
+        stack.addArrangedSubview(portLabel)
+        configureField(portField, placeholder: "8088", text: runner?.sshRemotePort.map(String.init))
+        portField.keyboardType = .numberPad
+        stack.addArrangedSubview(portField)
 
         stack.addArrangedSubview(makeLabel("Shared Secret"))
         configureField(secretField, placeholder: "Bearer token", text: nil)
@@ -104,6 +137,9 @@ final class RunnerEditVC: UIViewController {
         statusLabel.numberOfLines = 0
         statusLabel.textAlignment = .center
         stack.addArrangedSubview(statusLabel)
+
+        sshSwitch.isOn = runner?.usesSSH ?? false
+        updateTransportVisibility()
     }
 
     // MARK: - Actions
@@ -114,27 +150,48 @@ final class RunnerEditVC: UIViewController {
             showAlert("Nickname is required")
             return
         }
-        guard let urlStr = urlField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !urlStr.isEmpty,
-              URL(string: urlStr) != nil else {
-            showAlert("A valid URL is required")
-            return
-        }
         guard let secret = secretField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
               !secret.isEmpty else {
             showAlert("Shared secret is required")
             return
         }
 
+        // Resolve the transport: SSH host + remote port, or a direct URL.
+        let baseURL: String
+        let sshPort: Int?
+        if sshSwitch.isOn {
+            let cfg = SSHConfigStore.shared.config
+            guard cfg.isConfigured else {
+                showAlert("Configure your SSH host in Settings → SSH first.")
+                return
+            }
+            guard let port = resolvedPort() else {
+                showAlert("Enter a valid remote port (e.g. 8088).")
+                return
+            }
+            sshPort = port
+            baseURL = "ssh://\(cfg.host):\(port)"
+        } else {
+            guard let urlStr = urlField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !urlStr.isEmpty,
+                  URL(string: urlStr) != nil else {
+                showAlert("A valid URL is required")
+                return
+            }
+            sshPort = nil
+            baseURL = urlStr
+        }
+
         let isFirstRunner = RunnerStore.shared.loadRunners().isEmpty && isNew
 
         if isNew {
-            let config = RunnerConfig(nickname: nickname, baseURL: urlStr)
+            let config = RunnerConfig(nickname: nickname, baseURL: baseURL, sshRemotePort: sshPort)
             RunnerStore.shared.setSecret(secret, for: config.secretRef)
             RunnerStore.shared.addRunner(config)
         } else if var existing = runner {
             existing.nickname = nickname
-            existing.baseURL = urlStr
+            existing.baseURL = baseURL
+            existing.sshRemotePort = sshPort
             RunnerStore.shared.setSecret(secret, for: existing.secretRef)
             RunnerStore.shared.updateRunner(existing)
         }
@@ -148,25 +205,48 @@ final class RunnerEditVC: UIViewController {
     }
 
     @objc private func testTapped() {
-        guard let urlStr = urlField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-              let url = URL(string: urlStr),
-              let secret = secretField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+        guard let secret = secretField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
               !secret.isEmpty else {
-            statusLabel.text = "Fill in URL and secret first"
+            statusLabel.text = "Fill in the shared secret first"
             statusLabel.textColor = .systemOrange
             return
+        }
+
+        // Pick the probe matching the selected transport.
+        let probe: () async throws -> RunnerHealthResponse
+        if sshSwitch.isOn {
+            guard SSHConfigStore.shared.config.isConfigured else {
+                statusLabel.text = "Configure your SSH host in Settings → SSH first"
+                statusLabel.textColor = .systemOrange
+                return
+            }
+            guard let port = resolvedPort() else {
+                statusLabel.text = "Enter a valid remote port"
+                statusLabel.textColor = .systemOrange
+                return
+            }
+            let client = LoopRunnerSSHClient(sharedSecret: secret, remotePort: port)
+            probe = { try await client.checkHealth() }
+        } else {
+            guard let urlStr = urlField.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  let url = URL(string: urlStr) else {
+                statusLabel.text = "Fill in URL and secret first"
+                statusLabel.textColor = .systemOrange
+                return
+            }
+            let client = LoopRunnerClient(baseURL: url, sharedSecret: secret)
+            probe = { try await client.checkHealth() }
         }
 
         statusLabel.text = "Testing…"
         statusLabel.textColor = .secondaryLabel
         testButton.isEnabled = false
 
-        let client = LoopRunnerClient(baseURL: url, sharedSecret: secret)
         Task {
             do {
-                let health = try await client.checkHealth()
+                let health = try await probe()
                 await MainActor.run {
-                    statusLabel.text = "Connected — status: \(health.status)"
+                    statusLabel.text = "Connected — \(health.summary)"
                     statusLabel.textColor = .systemGreen
                     testButton.isEnabled = true
                 }
@@ -178,6 +258,28 @@ final class RunnerEditVC: UIViewController {
                 }
             }
         }
+    }
+
+    /// Remote port from the field, defaulting to 8088 when blank. Returns nil if
+    /// a non-empty value isn't a valid TCP port.
+    private func resolvedPort() -> Int? {
+        let raw = portField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if raw.isEmpty { return 8088 }
+        guard let p = Int(raw), p > 0, p < 65536 else { return nil }
+        return p
+    }
+
+    private func updateTransportVisibility() {
+        let ssh = sshSwitch.isOn
+        urlLabel.isHidden = ssh
+        urlField.isHidden = ssh
+        portLabel.isHidden = !ssh
+        portField.isHidden = !ssh
+        sshHintLabel.isHidden = !ssh
+    }
+
+    @objc private func sshSwitchChanged() {
+        updateTransportVisibility()
     }
 
     // MARK: - Notification permission

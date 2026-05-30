@@ -163,8 +163,20 @@ final class LoopRunnerPoller {
         }
     }
 
+    /// Builds the right polling transport for a runner: an SSH exec client when
+    /// the runner is bound to the configured SSH host, otherwise the direct
+    /// URLSession client. Returns nil if the shared secret or URL is missing.
+    private func makeClient(for runner: RunnerConfig) -> RunnerPolling? {
+        guard let secret = RunnerStore.shared.secret(for: runner.secretRef) else { return nil }
+        if let remotePort = runner.sshRemotePort {
+            return LoopRunnerSSHClient(sharedSecret: secret, remotePort: remotePort)
+        }
+        guard let url = URL(string: runner.baseURL) else { return nil }
+        return LoopRunnerClient(baseURL: url, sharedSecret: secret)
+    }
+
     private func pollRunner(_ runner: RunnerConfig) async {
-        guard let client = LoopRunnerClient(runner: runner) else { return }
+        guard let client = makeClient(for: runner) else { return }
 
         // Poll turns
         do {
