@@ -53,7 +53,7 @@ enum BundledSkillSeeds {
         }
     }
 
-    static let all: [Seed] = [polymarketTrending]
+    static let all: [Seed] = [polymarketTrending, runSSHCommand, claudeCode]
 
     // MARK: - Polymarket
 
@@ -148,6 +148,171 @@ enum BundledSkillSeeds {
                 markets: markets,
                 fetched_at: new Date().toISOString()
             };
+        }
+        """#
+    )
+
+    // MARK: - run_ssh_command
+
+    /// Executes a shell command on a remote host via the HTTP-based SSH relay.
+    /// Reads relay host/port/user from `host.getConfig(...)` so the user only
+    /// configures the connection once in Settings → SSH.
+    private static let runSSHCommand = Seed(
+        name: "run_ssh_command",
+        description: "Execute a shell command on the configured SSH relay host. Returns stdout, stderr, and exit_code.",
+        parameters: [
+            "type": "object",
+            "properties": [
+                "command": [
+                    "type": "string",
+                    "description": "The shell command to execute on the remote host."
+                ],
+                "session_id": [
+                    "type": "string",
+                    "description": "Optional session identifier for persistent sessions."
+                ],
+                "timeout_ms": [
+                    "type": "integer",
+                    "description": "Timeout in milliseconds (default: 30000)."
+                ]
+            ],
+            "required": ["command"]
+        ],
+        source: #"""
+        // run_ssh_command — execute a shell command via the SSH relay.
+        //
+        // Reads connection config from host.getConfig() so the relay
+        // endpoint is configured once in Settings and shared across skills.
+        async function run(args, host) {
+            const command = args.command;
+            if (!command) {
+                return { status: "error", error: "The `command` argument is required." };
+            }
+
+            const relayHost = host.getConfig("ssh_relay_host");
+            const relayPort = host.getConfig("ssh_relay_port") || "22";
+            const relayUser = host.getConfig("ssh_relay_user");
+
+            if (!relayHost || !relayUser) {
+                return {
+                    status: "error",
+                    error: "SSH relay not configured. Set host and username in Settings → SSH."
+                };
+            }
+
+            const timeoutMs = args.timeout_ms || 30000;
+            const sessionId = args.session_id || "default";
+
+            host.log("Running on " + relayUser + "@" + relayHost + ": " + command.slice(0, 60));
+
+            // Use the native ssh_client tool via the relay — the HTTP bridge
+            // at the relay host accepts POST /exec with command + session_id.
+            var relayURL = "https://" + relayHost + "/exec";
+            var payload = {
+                command: command,
+                session_id: sessionId,
+                user: relayUser,
+                timeout_ms: timeoutMs
+            };
+
+            try {
+                var res = await host.http({
+                    url: relayURL,
+                    method: "POST",
+                    json: payload
+                });
+
+                if (res.status === 200 && res.json) {
+                    return {
+                        status: "ok",
+                        stdout: res.json.stdout || "",
+                        stderr: res.json.stderr || "",
+                        exit_code: res.json.exit_code != null ? res.json.exit_code : -1
+                    };
+                }
+
+                return {
+                    status: "error",
+                    error: "Relay returned HTTP " + res.status,
+                    detail: (res.body || "").slice(0, 500)
+                };
+            } catch (e) {
+                return { status: "error", error: String(e) };
+            }
+        }
+        """#
+    )
+
+    // MARK: - claude_code
+
+    /// Dispatches a Claude Code session by composing `run_ssh_command`. Instead
+    /// of duplicating SSH relay logic, this skill calls `run_ssh_command` via
+    /// `host.callSkill`, demonstrating skill composition.
+    private static let claudeCode = Seed(
+        name: "claude_code",
+        description: "Start or continue a Claude Code session on the remote SSH host. Sends a prompt to Claude Code CLI and returns its output.",
+        parameters: [
+            "type": "object",
+            "properties": [
+                "prompt": [
+                    "type": "string",
+                    "description": "The prompt or instruction to send to Claude Code."
+                ],
+                "session_id": [
+                    "type": "string",
+                    "description": "Optional session ID for persistent Claude Code sessions."
+                ],
+                "timeout_ms": [
+                    "type": "integer",
+                    "description": "Timeout in milliseconds (default: 60000)."
+                ]
+            ],
+            "required": ["prompt"]
+        ],
+        source: #"""
+        // claude_code — thin wrapper around run_ssh_command that constructs
+        // a Claude Code CLI invocation. Uses host.callSkill for composition.
+        async function run(args, host) {
+            const prompt = args.prompt;
+            if (!prompt) {
+                return { status: "error", error: "The `prompt` argument is required." };
+            }
+
+            const sessionId = args.session_id || "claude-" + Date.now();
+            const timeoutMs = args.timeout_ms || 60000;
+
+            host.log("Dispatching to Claude Code...");
+
+            // Construct the Claude Code CLI command. The prompt is passed via
+            // stdin heredoc to avoid shell escaping issues.
+            var escapedPrompt = prompt.replace(/'/g, "'\\''");
+            var command = "claude --print '" + escapedPrompt + "'";
+
+            try {
+                var result = await host.callSkill("run_ssh_command", {
+                    command: command,
+                    session_id: sessionId,
+                    timeout_ms: timeoutMs
+                });
+
+                if (result && result.status === "ok") {
+                    return {
+                        status: "ok",
+                        summary: (result.stdout || "").slice(0, 2000),
+                        stdout: result.stdout || "",
+                        stderr: result.stderr || "",
+                        exit_code: result.exit_code
+                    };
+                }
+
+                return {
+                    status: "error",
+                    error: (result && result.error) || "run_ssh_command failed",
+                    detail: result
+                };
+            } catch (e) {
+                return { status: "error", error: String(e) };
+            }
         }
         """#
     )
