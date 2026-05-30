@@ -13,6 +13,8 @@
 //      host.http(opts)        → returns a Promise<{status, headers, body}>
 //      host.notify(title,body)→ schedules a local push notification
 //      host.sleep(ms)         → Promise<void> for pacing
+//      host.callTool(name,args)→ invoke a built-in native tool (e.g.
+//                               ssh_client) and await its JSON result
 //
 //  Skills are .js files with a top-level exported `run(args, host)` function.
 //  See Workspace/Skills/<name>/skill.js for the contract.
@@ -185,11 +187,23 @@ final class JSRuntime {
             }
         }
 
+        // host.__callTool(name, argsJSON, resolve, reject) — invoke a built-in
+        // native tool (the same ones the model can call: ssh_client, git_*,
+        // github_*, …) through the shared dispatcher and resolve the JS Promise
+        // with the tool's parsed JSON result.
+        let callTool: @convention(block) (String, String, JSValue, JSValue) -> Void = { [weak self] name, argsJSON, resolveFn, rejectFn in
+            self?.performToolCall(name: name,
+                                  argsJSON: argsJSON,
+                                  resolve: resolveFn,
+                                  reject: rejectFn)
+        }
+
         let host = JSValue(newObjectIn: context)
-        host?.setObject(log,    forKeyedSubscript: "__log"    as NSString)
-        host?.setObject(http,   forKeyedSubscript: "__http"   as NSString)
-        host?.setObject(notify, forKeyedSubscript: "notify"   as NSString)
-        host?.setObject(sleep,  forKeyedSubscript: "__sleep"  as NSString)
+        host?.setObject(log,      forKeyedSubscript: "__log"      as NSString)
+        host?.setObject(http,     forKeyedSubscript: "__http"     as NSString)
+        host?.setObject(notify,   forKeyedSubscript: "notify"     as NSString)
+        host?.setObject(sleep,    forKeyedSubscript: "__sleep"    as NSString)
+        host?.setObject(callTool, forKeyedSubscript: "__callTool" as NSString)
         context.setObject(host, forKeyedSubscript: "host" as NSString)
     }
 
@@ -210,6 +224,13 @@ final class JSRuntime {
     };
     host.sleep = function(ms) {
         return new Promise(function(resolve) { host.__sleep(ms, resolve); });
+    };
+    host.callTool = function(name, args) {
+        return new Promise(function(resolve, reject) {
+            try {
+                host.__callTool(String(name), JSON.stringify(args || {}), resolve, reject);
+            } catch (e) { reject(e); }
+        });
     };
     var console = {
         log:   function() { host.log(Array.from(arguments).map(String).join(' ')); },
@@ -321,5 +342,61 @@ final class JSRuntime {
                 resolve.call(withArguments: [result])
             }
         }.resume()
+    }
+
+    // MARK: - Native tool calls
+
+    /// Route a `host.callTool(name, args)` through the shared SkillDispatcher —
+    /// the same headless router the background scheduler uses — and resolve the
+    /// JS Promise with the tool's result. The tool's result message carries a
+    /// JSON string in `content`; we parse it back into an object so the skill
+    /// gets `{status, …}` rather than a string it has to re-parse.
+    ///
+    /// Dynamic (user-authored JS) skills are intentionally NOT reachable here:
+    /// letting one skill call another would open the door to unbounded
+    /// skill→skill recursion, and `callTool` exists to reach the *built-in*
+    /// surface. The dispatcher is invoked on the main queue to match the
+    /// chat-UI path (some skills touch main-thread state); the JS callback is
+    /// hopped back onto the runtime queue so all JSValue touches stay serial.
+    private func performToolCall(name: String, argsJSON: String, resolve: JSValue, reject: JSValue) {
+        let toolName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !toolName.isEmpty else {
+            reject.call(withArguments: ["callTool: a tool `name` is required"])
+            return
+        }
+
+        // Block re-entry into the dynamic registry — see the doc comment.
+        if DynamicSkillRegistry.shared.handles(functionName: toolName) {
+            reject.call(withArguments: [
+                "callTool can't invoke another user skill ('\(toolName)') — it's limited to built-in tools."
+            ])
+            return
+        }
+
+        let arguments: [String: Any] = {
+            guard let data = argsJSON.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return [:] }
+            return obj
+        }()
+
+        let call = FunctionCallStruct(name: toolName, arguments: arguments)
+        DispatchQueue.main.async {
+            SkillDispatcher.shared.dispatch(call) { [weak self] message in
+                guard let self = self else { return }
+                self.queue.async {
+                    // `message.content` is the tool's JSON payload. Parse it so
+                    // the skill receives a structured object; fall back to the
+                    // raw string if it isn't JSON.
+                    if let data = message.content.data(using: .utf8),
+                       let parsed = try? JSONSerialization.jsonObject(with: data),
+                       JSONSerialization.isValidJSONObject(parsed) {
+                        resolve.call(withArguments: [parsed])
+                    } else {
+                        resolve.call(withArguments: [message.content])
+                    }
+                }
+            }
+        }
     }
 }

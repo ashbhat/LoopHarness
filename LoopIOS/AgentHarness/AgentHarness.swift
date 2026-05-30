@@ -103,34 +103,34 @@ final class AgentHarness {
     /// drawer's "Skills" tab. This intentionally mirrors the `systemPromptFragment`
     /// list assembled in `init()` below (same order) — when you add a skill
     /// there, add its display row here so the sidebar stays in sync.
-    static let bundledSkillCatalog: [(name: String, summary: String)] = {
-        var catalog: [(name: String, summary: String)] = [
-            ("Notion",           "Read and write Notion pages and databases"),
-            ("Slack",            "Read channels/DMs/mentions, search, and send messages with confirmation"),
-            ("Scheduler",        "Schedule reminders and recurring background tasks"),
-            ("Web Search",       "Search the web for up-to-date information"),
-            ("URL Fetch",        "Fetch and read a single web page (no API key)"),
-            ("Git",              "Clone, pull, and check status of git repositories"),
-            ("GitHub",           "Review/merge/comment on PRs, open PRs and issues, browse repos and notifications"),
-            ("Self-Improvement", "Update the agent's own SOUL / USER / AGENTS docs"),
-            ("File System",      "Browse and edit files in the workspace"),
-            ("Spec Builder",     "Draft execution specs from a goal"),
-            ("Location",         "Look up the device's current location"),
-            ("Image",            "Generate images from a text prompt"),
-            ("PDF",              "Generate a clean, page-aware PDF from a markdown document"),
-            ("Obsidian",         "Read and write the Obsidian vault"),
-            ("Calendar",         "Read and create calendar events"),
-            ("Music",            "Search and control Apple Music"),
-            ("Skill Builder",    "Author new local skills on the fly"),
-            ("Sub-Agent",        "Spawn a focused sub-agent for a subtask"),
-            ("Integration",      "Manage third-party service connections"),
-            ("Cursor",           "Dispatch coding tasks to Cursor cloud agents (opens PRs)"),
-            ("Devin",            "Dispatch coding tasks to Devin cloud agents (opens PRs, live transcript)"),
-            ("X (Twitter)",      "Post tweets to X (Twitter) with confirmation"),
-            ("SSH",              "Execute shell commands on a remote host via SSH"),
+    static let bundledSkillCatalog: [(name: String, summary: String, tools: [[String: Any]])] = {
+        var catalog: [(name: String, summary: String, tools: [[String: Any]])] = [
+            ("Notion",           "Read and write Notion pages and databases", NotionSkill.tools),
+            ("Slack",            "Read channels/DMs/mentions, search, and send messages with confirmation", SlackSkill.tools),
+            ("Scheduler",        "Schedule reminders and recurring background tasks", SchedulerSkill.tools),
+            ("Web Search",       "Search the web for up-to-date information", ExaSkill.tools),
+            ("URL Fetch",        "Fetch and read a single web page (no API key)", URLFetchSkill.tools),
+            ("Git",              "Clone, pull, and check status of git repositories", GitSkill.tools),
+            ("GitHub",           "Review/merge/comment on PRs, open PRs and issues, browse repos and notifications", GitHubSkill.tools),
+            ("Self-Improvement", "Update the agent's own SOUL / USER / AGENTS docs", SelfImprovementSkill.tools),
+            ("File System",      "Browse and edit files in the workspace", FileSystemSkill.tools),
+            ("Spec Builder",     "Draft execution specs from a goal", SpecBuilderSkill.tools),
+            ("Location",         "Look up the device's current location", LocationSkill.tools + MapsSkill.tools),
+            ("Image",            "Generate images from a text prompt", ImageSkill.tools),
+            ("PDF",              "Generate a clean, page-aware PDF from a markdown document", PDFSkill.tools),
+            ("Obsidian",         "Read and write the Obsidian vault", ObsidianSkill.tools),
+            ("Calendar",         "Read and create calendar events", CalendarSkill.tools),
+            ("Music",            "Search and control Apple Music", MusicSkill.tools),
+            ("Skill Builder",    "Author new local skills on the fly", SkillBuilderSkill.tools),
+            ("Sub-Agent",        "Spawn a focused sub-agent for a subtask", SubAgentSkill.tools),
+            ("Integration",      "Manage third-party service connections", IntegrationSkill.tools),
+            ("Cursor",           "Dispatch coding tasks to Cursor cloud agents (opens PRs)", CursorSkill.tools),
+            ("Devin",            "Dispatch coding tasks to Devin cloud agents (opens PRs, live transcript)", DevinSkill.tools),
+            ("X (Twitter)",      "Post tweets to X (Twitter) with confirmation", TwitterSkill.tools),
+            ("SSH",              "Execute shell commands on a remote host via SSH", SSHSkill.tools),
         ]
         #if canImport(HealthKit) && os(iOS)
-        catalog.append(("Apple Health", "Read-only access to steps, distance, workouts, heart rate, sleep, body mass"))
+        catalog.append(("Apple Health", "Read-only access to steps, distance, workouts, heart rate, sleep, body mass", HealthSkill.tools))
         #endif
         return catalog
     }()
@@ -177,10 +177,10 @@ final class AgentHarness {
         _ = Workspace.shared
         loadPersistedSelfDocs()
 
-        // Seed bundled sample skills (Polymarket, etc.) into the workspace
-        // on first launch so the spec's user story works without forcing
-        // the user to author anything by hand. Subsequent launches detect
-        // the files on disk and skip.
+        // Seed any bundled starter skills into the workspace on first launch.
+        // Currently there are none (BundledSkillSeeds.all is empty), so this is
+        // a no-op; kept so a starter can be reintroduced later. Subsequent
+        // launches detect existing files on disk and skip.
         BundledSkillSeeds.seedIfNeeded()
 
         // Seed the reference docs (ABOUT_LOOP.md — the agent's own code map)

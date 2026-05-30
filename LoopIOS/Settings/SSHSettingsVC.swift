@@ -16,6 +16,13 @@ final class SSHSettingsVC: UIViewController {
     private let scrollView = UIScrollView()
     private let stack = UIStackView()
 
+    private let nameField: UITextField = {
+        let f = SSHSettingsVC.makeField(placeholder: "Name (e.g. prod-nyc1)")
+        f.autocapitalizationType = .words
+        f.autocorrectionType = .default
+        f.font = .preferredFont(forTextStyle: .body)
+        return f
+    }()
     private let hostField = SSHSettingsVC.makeField(placeholder: "Host (e.g. 192.168.1.10)")
     private let portField = SSHSettingsVC.makeField(placeholder: "Port", keyboard: .numberPad)
     private let usernameField = SSHSettingsVC.makeField(placeholder: "Username")
@@ -42,11 +49,25 @@ final class SSHSettingsVC: UIViewController {
         return UIButton(configuration: cfg)
     }()
 
+    // MARK: - Editing target
+
+    /// The connection being edited. A nil initializer argument means "new".
+    private var editingConnection: SSHConfig
+    private let isNew: Bool
+
+    init(connection: SSHConfig?) {
+        self.editingConnection = connection ?? SSHConfig()
+        self.isNew = (connection == nil)
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "SSH"
+        title = isNew ? "New Connection" : "Edit Connection"
         view.backgroundColor = .systemGroupedBackground
 
         navigationItem.rightBarButtonItem = UIBarButtonItem(
@@ -132,6 +153,7 @@ final class SSHSettingsVC: UIViewController {
         ])
 
         let items: [(String, UIView)] = [
+            ("Name", nameField),
             ("Host", hostField),
             ("Port", portField),
             ("Username", usernameField),
@@ -217,7 +239,8 @@ final class SSHSettingsVC: UIViewController {
     // MARK: - Data
 
     private func loadCurrent() {
-        let cfg = SSHConfigStore.shared.config
+        let cfg = editingConnection
+        nameField.text = cfg.name
         hostField.text = cfg.host
         portField.text = cfg.port == 0 ? "22" : String(cfg.port)
         usernameField.text = cfg.username
@@ -225,11 +248,16 @@ final class SSHSettingsVC: UIViewController {
         passphraseField.text = cfg.passphrase
     }
 
-    /// Builds an `SSHConfig` from the current field values.
+    /// Builds an `SSHConfig` from the current field values, preserving the
+    /// edited connection's identity (so saves update in place).
     private func currentConfig() -> SSHConfig {
         let port = Int(portField.text ?? "22") ?? 22
+        let host = hostField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let name = nameField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return SSHConfig(
-            host: hostField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            id: editingConnection.id,
+            name: name.isEmpty ? host : name,
+            host: host,
             port: port,
             username: usernameField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
             privateKey: privateKeyView.text.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -237,11 +265,20 @@ final class SSHSettingsVC: UIViewController {
         )
     }
 
+    /// Persists the current field values into the store and keeps editing the
+    /// same connection identity.
+    @discardableResult
+    private func persist() -> SSHConfig {
+        let config = currentConfig()
+        SSHConfigStore.shared.addOrUpdate(config)
+        editingConnection = config
+        return config
+    }
+
     @objc private func saveTapped() {
         view.endEditing(true)
 
-        let config = currentConfig()
-        SSHConfigStore.shared.config = config
+        let config = persist()
 
         guard config.isConfigured else {
             setStatus(.failed("Enter host, username, and private key to connect."))
@@ -251,7 +288,7 @@ final class SSHSettingsVC: UIViewController {
         setStatus(.checking)
         Task { @MainActor in
             do {
-                try await SSHSkill.shared.testConnection()
+                try await SSHSkill.shared.testConnection(config)
                 self.setStatus(.connected)
             } catch {
                 self.setStatus(.failed("Could not connect: \(error.localizedDescription)"))
@@ -262,14 +299,13 @@ final class SSHSettingsVC: UIViewController {
     @objc private func openTerminalTapped() {
         view.endEditing(true)
 
-        let config = currentConfig()
+        let config = persist()
         guard config.isConfigured else {
             setStatus(.failed("Enter host, username, and private key to open a terminal."))
             return
         }
-        // Persist what we're connecting with, then open the interactive shell
-        // full screen (not a push) so it stands on its own, edge to edge.
-        SSHConfigStore.shared.config = config
+        // Open the interactive shell full screen (not a push) so it stands on
+        // its own, edge to edge.
         let terminal = SSHTerminalViewController(config: config)
         terminal.modalPresentationStyle = .fullScreen
         present(terminal, animated: true)
