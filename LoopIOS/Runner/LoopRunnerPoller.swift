@@ -66,6 +66,10 @@ final class LoopRunnerPoller {
 
     #if os(iOS)
     private var bgTaskId: UIBackgroundTaskIdentifier = .invalid
+    /// Timer + task for the short polling window iOS grants right after the
+    /// app backgrounds (see `startBackgroundGracePolling`).
+    private var graceTimer: DispatchSourceTimer?
+    private var graceTaskId: UIBackgroundTaskIdentifier = .invalid
     #endif
 
     private init() {}
@@ -84,6 +88,9 @@ final class LoopRunnerPoller {
 
     /// Call from `sceneDidBecomeActive`. Starts the 3-second foreground timer.
     func startForegroundPolling() {
+        #if os(iOS)
+        endBackgroundGracePolling()   // back in foreground — the grace window is moot
+        #endif
         lock.lock(); defer { lock.unlock() }
         guard foregroundTimer == nil else { return }
 
@@ -97,18 +104,69 @@ final class LoopRunnerPoller {
         Self.log.info("Foreground polling started")
     }
 
-    /// Call from `sceneWillResignActive`. Stops the foreground timer and
-    /// schedules the next background refresh.
+    /// Call from `sceneWillResignActive`. Stops the foreground timer, keeps
+    /// polling through the brief background window iOS grants, and schedules the
+    /// next background refresh.
     func stopForegroundPolling() {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         foregroundTimer?.cancel()
         foregroundTimer = nil
+        lock.unlock()
         Self.log.info("Foreground polling stopped")
 
         #if os(iOS)
+        startBackgroundGracePolling()
         submitNextBGTask()
         #endif
     }
+
+    #if os(iOS)
+    /// After the app backgrounds, iOS grants ~30 s of execution. Keep polling
+    /// every few seconds for that window so a short turn that finishes right
+    /// after the user leaves still fires its notification — without waiting for
+    /// the (iOS-throttled, ~15 min) BGAppRefresh. Longer tasks need APNs.
+    private func startBackgroundGracePolling() {
+        let app = UIApplication.shared
+
+        lock.lock()
+        guard graceTimer == nil else { lock.unlock(); return }
+        let taskId = app.beginBackgroundTask(withName: "loop.runner.grace") { [weak self] in
+            self?.endBackgroundGracePolling()
+        }
+        guard taskId != .invalid else { lock.unlock(); return }
+        graceTaskId = taskId
+
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timer.schedule(deadline: .now() + 3, repeating: 4)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            // Stop before iOS suspends us, otherwise the task is force-ended.
+            if app.backgroundTimeRemaining < 8 {
+                self.endBackgroundGracePolling()
+                return
+            }
+            self.pollAllRunners()
+        }
+        graceTimer = timer
+        lock.unlock()
+
+        timer.resume()
+        Self.log.info("Background grace polling started")
+    }
+
+    private func endBackgroundGracePolling() {
+        lock.lock()
+        graceTimer?.cancel()
+        graceTimer = nil
+        let taskId = graceTaskId
+        graceTaskId = .invalid
+        lock.unlock()
+
+        if taskId != .invalid {
+            UIApplication.shared.endBackgroundTask(taskId)
+        }
+    }
+    #endif
 
     // MARK: - Per-runner state (UserDefaults)
 
