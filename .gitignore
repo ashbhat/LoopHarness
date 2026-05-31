@@ -41,6 +41,14 @@ venv/
 .idea/
 .claude/settings.local.json
 
+# ─── Fastlane ─────────────────────────────────────────────────────────
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/
+fastlane/test_output/
+fastlane/profiles/
+vendor/bundle/
+
 # ─── Misc ─────────────────────────────────────────────────────────────
 *.log
 voter_guide.xcodeproj/

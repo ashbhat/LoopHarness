@@ -1,0 +1,138 @@
+default_platform(:ios)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+APP_IDENTIFIER       = "com.bhat.intel"
+SHARE_EXT_IDENTIFIER = "com.bhat.intel.LoopShare"
+XCODE_PROJECT        = "Loop.xcodeproj"
+IOS_SCHEME            = "Loop_iOS"
+
+platform :ios do
+  # -------------------------------------------------------------------------
+  # beta — build Loop and upload to TestFlight
+  # -------------------------------------------------------------------------
+  desc "Build the iOS app and upload to TestFlight"
+  lane :beta do |options|
+    # -- CI keychain --
+    setup_ci if ENV["CI"]
+
+    # -- App Store Connect API key --
+    api_key = app_store_connect_api_key(
+      key_id:               ENV.fetch("ASC_KEY_ID"),
+      issuer_id:            ENV.fetch("ASC_ISSUER_ID"),
+      key_content:          ENV.fetch("ASC_KEY_CONTENT"),
+      is_key_content_base64: true
+    )
+
+    # -- Signing certificate --
+    install_distribution_certificate
+
+    # -- Provisioning profiles (downloaded from ASC via API key) --
+    profiles = {}
+    [APP_IDENTIFIER, SHARE_EXT_IDENTIFIER].each do |bundle_id|
+      sigh(
+        api_key:        api_key,
+        app_identifier: bundle_id,
+        readonly:       true
+      )
+      profiles[bundle_id] = lane_context[SharedValues::SIGH_NAME]
+    end
+
+    # -- Build number --
+    build_number = options[:build_number] ||
+                   ENV["GITHUB_RUN_NUMBER"] ||
+                   Time.now.strftime("%Y%m%d%H%M")
+    increment_build_number(
+      build_number: build_number,
+      xcodeproj:    XCODE_PROJECT
+    )
+
+    # -- Changelog --
+    changelog = generate_changelog
+
+    # -- Write Secrets.xcconfig so the archive picks up DEVELOPMENT_TEAM --
+    team_id = ENV.fetch("APPLE_TEAM_ID", "6HT9LCU3B7")
+    File.write("Secrets.xcconfig", "DEVELOPMENT_TEAM = #{team_id}\n")
+
+    # -- Archive & export --
+    build_app(
+      project:        XCODE_PROJECT,
+      scheme:         IOS_SCHEME,
+      configuration:  "Release",
+      clean:          true,
+      export_method:  "app-store",
+      output_directory: "./build",
+      export_options: {
+        signingStyle: "manual",
+        provisioningProfiles: profiles
+      }
+    )
+
+    # -- Upload to TestFlight --
+    groups_csv = ENV.fetch("TESTFLIGHT_GROUPS", "")
+    groups     = groups_csv.split(",").map(&:strip).reject(&:empty?)
+
+    upload_to_testflight(
+      api_key:                          api_key,
+      changelog:                        changelog,
+      distribute_external:              !groups.empty?,
+      groups:                           groups.empty? ? nil : groups,
+      skip_waiting_for_build_processing: false
+    )
+
+    UI.success "Build #{build_number} uploaded to TestFlight!"
+  end
+
+  # -------------------------------------------------------------------------
+  # Private helpers
+  # -------------------------------------------------------------------------
+  private_lane :install_distribution_certificate do
+    cert_b64 = ENV["IOS_DISTRIBUTION_CERTIFICATE_P12"]
+    return UI.important("No IOS_DISTRIBUTION_CERTIFICATE_P12 set — skipping cert import") if cert_b64.nil?
+
+    require "base64"
+    require "tempfile"
+
+    cert_file = Tempfile.new(["dist_cert", ".p12"])
+    cert_file.binmode
+    cert_file.write(Base64.decode64(cert_b64))
+    cert_file.close
+
+    import_certificate(
+      certificate_path:     cert_file.path,
+      certificate_password: ENV.fetch("IOS_CERTIFICATE_PASSWORD", ""),
+      keychain_name:        ENV.fetch("MATCH_KEYCHAIN_NAME", "fastlane_tmp_keychain-db"),
+      keychain_password:    ENV.fetch("MATCH_KEYCHAIN_PASSWORD", "")
+    )
+  end
+
+  private_lane :generate_changelog do
+    # Strategy:
+    #   1. If a git tag exists, diff from the last tag to HEAD.
+    #   2. Otherwise, use the last 50 commits.
+    # The tag-based approach works best when you tag each TestFlight upload
+    # (e.g., `testflight/42`). See docs/TESTFLIGHT.md for details.
+    begin
+      tag = last_git_tag
+      if tag && !tag.empty?
+        log = changelog_from_git_commits(
+          between: [tag, "HEAD"],
+          pretty: "- %s (%h)",
+          merge_commit_filtering: "exclude_merges"
+        )
+      else
+        raise "no tags"
+      end
+    rescue StandardError
+      log = changelog_from_git_commits(
+        commits_count: 50,
+        pretty: "- %s (%h)",
+        merge_commit_filtering: "exclude_merges"
+      )
+    end
+
+    log = "No changes recorded." if log.to_s.strip.empty?
+    log
+  end
+end

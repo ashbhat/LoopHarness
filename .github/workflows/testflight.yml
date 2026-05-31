@@ -1,0 +1,64 @@
+name: testflight
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: "Override build number (leave blank for GITHUB_RUN_NUMBER)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false          # let in-flight uploads finish
+
+jobs:
+  deploy:
+    name: Build & upload to TestFlight
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      ASC_KEY_ID:      ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID:   ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+      APPLE_TEAM_ID:   ${{ secrets.APPLE_TEAM_ID }}
+      IOS_DISTRIBUTION_CERTIFICATE_P12: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_P12 }}
+      IOS_CERTIFICATE_PASSWORD:         ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      TESTFLIGHT_GROUPS: ${{ secrets.TESTFLIGHT_GROUPS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for changelog generation
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app || sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true        # caches gems from Gemfile.lock
+
+      - name: Run Fastlane beta
+        run: |
+          BUILD_NUM="${{ inputs.build_number }}"
+          if [ -z "$BUILD_NUM" ]; then
+            bundle exec fastlane ios beta
+          else
+            bundle exec fastlane ios beta build_number:"$BUILD_NUM"
+          fi
+
+      - name: Tag successful deploy
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="testflight/${{ github.run_number }}"
+          git tag "$TAG"
+          git push origin "$TAG"

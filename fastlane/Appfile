@@ -1,0 +1,2 @@
+app_identifier ENV.fetch("APP_IDENTIFIER", "com.bhat.intel")
+team_id        ENV.fetch("APPLE_TEAM_ID", "6HT9LCU3B7")
