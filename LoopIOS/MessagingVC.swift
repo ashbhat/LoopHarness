@@ -2159,6 +2159,60 @@ extension MessagingVC: UITableViewDelegate, UITableViewDataSource {
     func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
         return 100
     }
+
+    // MARK: - Long-press context menu (branch conversation)
+
+    func tableView(_ tableView: UITableView,
+                   contextMenuConfigurationForRowAt indexPath: IndexPath,
+                   point: CGPoint) -> UIContextMenuConfiguration? {
+        // Only offer the menu on real message rows (not the AI-thinking row).
+        guard indexPath.row < visible_messages.count else { return nil }
+        let message = visible_messages[indexPath.row]
+        // Only user and assistant messages make sense as branch points.
+        guard message.role == "user" || message.role == "assistant" else { return nil }
+
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            let branchAction = UIAction(
+                title: "Branch conversation from here",
+                image: UIImage(systemName: "arrow.triangle.branch")
+            ) { [weak self] _ in
+                self?.branchConversation(upToVisibleIndex: indexPath.row)
+            }
+            return UIMenu(title: "", children: [branchAction])
+        }
+    }
+
+    /// Create a new conversation seeded with every message (including system
+    /// and function-call turns) up to and including the visible message at
+    /// `visibleIndex`, then switch to it. The original conversation is
+    /// untouched.
+    private func branchConversation(upToVisibleIndex visibleIndex: Int) {
+        guard visibleIndex < visible_messages.count else { return }
+        let targetMessageId = visible_messages[visibleIndex].id
+
+        // Find the position of the target message in the full (unfiltered)
+        // message array so we copy system/function turns too.
+        guard let fullIndex = messages.firstIndex(where: { $0.id == targetMessageId }) else { return }
+
+        // Stop any in-flight TTS before switching away.
+        stopSpeaking()
+
+        let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short)
+        let branchedConversation = conversationManager.createConversation(title: "Branch \(timestamp)")
+
+        // Persist every message up to (and including) the branch point.
+        for i in 0...fullIndex {
+            let msg = messages[i]
+            // Skip the system prompt — the new conversation will get its own.
+            if msg.role == "system" { continue }
+            conversationManager.addMessage(msg, to: branchedConversation)
+        }
+
+        // Switch to the branched conversation.
+        if let fresh = conversationManager.getConversation(by: branchedConversation.id) {
+            loadConversation(fresh)
+        }
+    }
 }
 
 // MARK: - UIGestureRecognizerDelegate
