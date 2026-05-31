@@ -42,6 +42,34 @@ class MessagingCell: UITableViewCell {
     let animatingtextView = UITextView()
     var timer: Timer?
 
+    // MARK: - Type-on reveal animation
+    // ChatGPT-style word-by-word fade-in for a freshly arrived assistant
+    // message. The base `textView` holds the same text at alpha 0 so the cell
+    // reaches its final height on frame one; the fade then plays inside that
+    // fixed frame, so it never thrashes tableView layout or jumps scroll —
+    // the failure mode that retired the old per-word typewriter.
+    /// Drives the fade; nil unless an animation is in flight.
+    private var revealLink: CADisplayLink?
+    /// Working copy whose per-unit foreground alpha ramps up each frame.
+    private var revealString: NSMutableAttributedString?
+    /// Reveal units (each a word + its trailing whitespace) over `revealString`.
+    private var revealUnits: [NSRange] = []
+    /// Original opaque foreground color per unit, so the fade modulates alpha
+    /// without clobbering markdown syntax-highlight colors.
+    private var revealUnitColors: [UIColor] = []
+    /// Units already pinned at full alpha; the moving window only touches
+    /// units ahead of this, keeping each frame O(window) not O(length).
+    private var revealSettledUnits = 0
+    /// Reveal head in "unit" space; advances by `revealUnitsPerSecond`.
+    private var revealHead: CGFloat = 0
+    private var revealUnitsPerSecond: CGFloat = 0
+    private var revealLastTimestamp: CFTimeInterval = 0
+    /// Units over which alpha ramps 0→1 — the soft edge that reads as a fade.
+    private let revealFadeWindow: CGFloat = 6
+    /// Fired once when the reveal reaches the end naturally (not on cancel /
+    /// reuse). Used by the onboarding path to reveal its pills afterwards.
+    private var revealCompletion: (() -> Void)?
+
     /// Vertical stack used when the assistant message contains a markdown
     /// table. Holds alternating UITextViews (prose segments) and UIViews
     /// (rendered table grids). Hidden — and emptied — for plain messages
@@ -273,6 +301,10 @@ class MessagingCell: UITableViewCell {
         timer?.invalidate()
         timer = nil
 
+        // Halt any in-flight type-on reveal so a recycled cell doesn't keep
+        // fading into the wrong message.
+        stopTypeOnReveal()
+
         // Hide all views instead of removing them for better performance
         profileImageView.isHidden = true
         textView.isHidden = true
@@ -339,6 +371,11 @@ class MessagingCell: UITableViewCell {
         // preview card — the view is reused across cells that render
         // different card kinds.
         onboardingCardView.isHidden = true
+        // Restore full opacity / position — a cell recycled mid type-on
+        // reveal would otherwise carry over the alpha-0 + offset the pill
+        // fade-in started from.
+        onboardingCardView.alpha = 1
+        onboardingCardView.transform = .identity
         onboardingCardView.reset()
         NSLayoutConstraint.deactivate(onboardingCardConstraints)
         onboardingCardConstraints.removeAll()
@@ -440,7 +477,7 @@ class MessagingCell: UITableViewCell {
         // Routed first so it bypasses the image / file / table branches
         // below — onboarding messages never carry those.
         if let card = data.onboardingCard, data.role == "assistant" {
-            applyOnboardingCard(card, accompanyingText: data.content)
+            applyOnboardingCard(card, accompanyingText: data.content, shouldAnimate: shouldAnimate)
             return
         }
         // User-side onboarding echoes (the .done sentinel) render as plain
@@ -571,13 +608,22 @@ class MessagingCell: UITableViewCell {
             ttsIndicator.stopAnimating()
             ttsIndicator.isHidden = true
 
-            // Render the full message immediately. The old per-word typewriter
-            // animation (`animateText`) caused highly variable perceived speed
-            // (short replies = instant, long replies = multi-second crawl) plus
-            // quadratic regex cost and per-tick tableView layout thrash.
-            // See docs/streaming-investigation.md for the full analysis.
-            textView.alpha = 1.0
-            animatingtextView.attributedText = self.attributedString(from: data.content)
+            // Type-on: fade the words in left-to-right for a freshly arrived
+            // response (shouldAnimate). On cell reuse / scroll-back
+            // (shouldAnimate == false) or with Reduce Motion on, render
+            // instantly. Unlike the old per-word typewriter (`animateText`) —
+            // which re-ran markdown regex per tick and relaid out the table —
+            // this renders markdown once, fixes the height via `textView`, and
+            // only modulates per-word alpha. See docs/streaming-investigation.md.
+            let full = self.attributedString(from: data.content)
+            if shouldAnimate, !UIAccessibility.isReduceMotionEnabled {
+                startTypeOnReveal(full: full)
+            } else {
+                stopTypeOnReveal()
+                textView.alpha = 1.0
+                animatingtextView.alpha = 1
+                animatingtextView.attributedText = full
+            }
             
             // Update content size after setting text
             // updateContentSize() // Disabled for better scroll performance
@@ -689,6 +735,139 @@ class MessagingCell: UITableViewCell {
         // expanded AgentView transcript share a single source of truth for
         // markdown styling.
         return MarkdownAttributedString.render(text)
+    }
+
+    // MARK: - Type-on reveal
+
+    /// Begin a ChatGPT-style word-by-word fade-in of `full` in
+    /// `animatingtextView`. The base `textView` holds the same text at alpha 0
+    /// so the cell reaches its final height up front and the fade plays inside
+    /// a fixed frame (no relayout / scroll jump).
+    private func startTypeOnReveal(full: NSAttributedString, onComplete: (() -> Void)? = nil) {
+        stopTypeOnReveal()
+        revealCompletion = onComplete
+
+        // Invisible base layer fixes the final layout/height.
+        textView.attributedText = full
+        textView.alpha = 0
+
+        let units = wordUnits(in: full.string as NSString)
+        // Empty or single word — nothing meaningful to animate.
+        guard units.count > 1 else {
+            animatingtextView.alpha = 1
+            animatingtextView.attributedText = full
+            textView.alpha = 1
+            let done = revealCompletion
+            revealCompletion = nil
+            done?()
+            return
+        }
+
+        // Snapshot each unit's real color, then knock every unit to alpha 0.
+        let working = NSMutableAttributedString(attributedString: full)
+        var colors: [UIColor] = []
+        colors.reserveCapacity(units.count)
+        for unit in units {
+            let base = (full.attribute(.foregroundColor, at: unit.location, effectiveRange: nil) as? UIColor) ?? .label
+            colors.append(base)
+            working.addAttribute(.foregroundColor, value: base.withAlphaComponent(0), range: unit)
+        }
+
+        revealString = working
+        revealUnits = units
+        revealUnitColors = colors
+        revealSettledUnits = 0
+        revealHead = 0
+        revealLastTimestamp = 0
+
+        // Bound total time so short replies aren't instant and long ones don't
+        // crawl: ~12ms/word, clamped to [0.35s, 1.4s]. The head must also
+        // traverse the trailing fade window, hence the `+ revealFadeWindow`.
+        let duration = min(max(Double(units.count) * 0.012, 0.35), 1.4)
+        revealUnitsPerSecond = (CGFloat(units.count) + revealFadeWindow) / CGFloat(duration)
+
+        animatingtextView.alpha = 1
+        animatingtextView.attributedText = working
+
+        let link = CADisplayLink(target: self, selector: #selector(stepTypeOnReveal(_:)))
+        link.add(to: .main, forMode: .common)
+        revealLink = link
+    }
+
+    @objc private func stepTypeOnReveal(_ link: CADisplayLink) {
+        guard let working = revealString, !revealUnits.isEmpty else {
+            stopTypeOnReveal()
+            return
+        }
+
+        if revealLastTimestamp == 0 { revealLastTimestamp = link.timestamp }
+        revealHead += revealUnitsPerSecond * CGFloat(link.timestamp - revealLastTimestamp)
+        revealLastTimestamp = link.timestamp
+
+        let count = revealUnits.count
+        let trailing = revealHead - revealFadeWindow
+
+        // Pin units fully behind the window at their real color, once each.
+        let settleTarget = trailing >= 0 ? min(count, Int(trailing.rounded(.down)) + 1) : 0
+        if settleTarget > revealSettledUnits {
+            for i in revealSettledUnits..<settleTarget {
+                working.addAttribute(.foregroundColor, value: revealUnitColors[i], range: revealUnits[i])
+            }
+            revealSettledUnits = settleTarget
+        }
+
+        // Ramp alpha across units currently inside the fade window.
+        let activeEnd = revealHead >= 0 ? min(count, Int(revealHead.rounded(.down)) + 1) : 0
+        if revealSettledUnits < activeEnd {
+            for i in revealSettledUnits..<activeEnd {
+                let alpha = min(max((revealHead - CGFloat(i)) / revealFadeWindow, 0), 1)
+                working.addAttribute(.foregroundColor,
+                                     value: revealUnitColors[i].withAlphaComponent(alpha),
+                                     range: revealUnits[i])
+            }
+        }
+
+        animatingtextView.attributedText = working
+
+        if revealSettledUnits >= count {
+            // Grab the completion before teardown clears it, then fire after —
+            // this is the only path that runs it (cancel / reuse never do).
+            let done = revealCompletion
+            stopTypeOnReveal()
+            done?()
+        }
+    }
+
+    /// Tear down the reveal and free its working state. Idempotent. Does NOT
+    /// fire `revealCompletion` — only natural completion in step does.
+    private func stopTypeOnReveal() {
+        revealLink?.invalidate()
+        revealLink = nil
+        revealString = nil
+        revealUnits = []
+        revealUnitColors = []
+        revealSettledUnits = 0
+        revealHead = 0
+        revealLastTimestamp = 0
+        revealCompletion = nil
+    }
+
+    /// Split `string` into reveal units: each a run of non-whitespace plus the
+    /// whitespace that trails it (so spaces/newlines ride along and we never
+    /// reveal a dangling gap). Leading whitespace forms its own unit.
+    private func wordUnits(in string: NSString) -> [NSRange] {
+        // Common BMP whitespace code units: space, tab, LF, CR, VT, FF, NBSP.
+        let ws: Set<unichar> = [0x20, 0x09, 0x0A, 0x0D, 0x0B, 0x0C, 0xA0]
+        var units: [NSRange] = []
+        let len = string.length
+        var i = 0
+        while i < len {
+            let start = i
+            while i < len, !ws.contains(string.character(at: i)) { i += 1 }
+            while i < len, ws.contains(string.character(at: i)) { i += 1 }
+            units.append(NSRange(location: start, length: i - start))
+        }
+        return units
     }
 
     /// Build the model-label base text, appending "| Context X%" when token
@@ -1408,7 +1587,7 @@ class MessagingCell: UITableViewCell {
     /// but the model label is hidden (onboarding turns have no model
     /// attribution). For `.answered`, render just the prose — the chip
     /// row collapses away and the cell shrinks to the height of the bubble.
-    private func applyOnboardingCard(_ kind: OnboardingCardKind, accompanyingText: String) {
+    private func applyOnboardingCard(_ kind: OnboardingCardKind, accompanyingText: String, shouldAnimate: Bool) {
         if onboardingCardView.superview == nil {
             contentView.addSubview(onboardingCardView)
             onboardingCardView.translatesAutoresizingMaskIntoConstraints = false
@@ -1417,11 +1596,18 @@ class MessagingCell: UITableViewCell {
         onboardingCardView.isHidden = !hasInteractiveCard
         onboardingCardView.apply(kind, delegate: onboardingDelegate)
 
+        // Type the prose on for any freshly-arrived prompt with text —
+        // including the terminal `.done` sign-off, which has no pills. The
+        // pill reveal is gated separately on `hasInteractiveCard` below.
+        // Reuse / scroll-back and Reduce Motion render instantly.
+        let animate = shouldAnimate && !accompanyingText.isEmpty
+            && !UIAccessibility.isReduceMotionEnabled
+
         // Visible chrome: just the prompt text and (maybe) the card. Hide
         // everything else that could bleed in via cell reuse.
         profileImageView.isHidden = true
         textView.isHidden = false
-        animatingtextView.isHidden = true
+        animatingtextView.isHidden = !animate
         actionButton.isHidden = true
         shimmerLabel.isHidden = true
         modelLabel.isHidden = true
@@ -1443,16 +1629,31 @@ class MessagingCell: UITableViewCell {
         textView.textContainer.lineFragmentPadding = 0
         textView.isScrollEnabled = false
         textView.isEditable = false
+        animatingtextView.backgroundColor = .clear
+        animatingtextView.textContainerInset = .zero
+        animatingtextView.textContainer.lineFragmentPadding = 0
+        animatingtextView.isScrollEnabled = false
+        animatingtextView.isEditable = false
         // Prompt text runs through the same markdown formatter the regular
-        // assistant path uses (sans streaming animation) so onboarding can
-        // bold key phrases / use inline links to guide the user.
-        textView.attributedText = self.attributedString(from: accompanyingText)
+        // assistant path uses so onboarding can bold key phrases / use inline
+        // links to guide the user.
+        let full = self.attributedString(from: accompanyingText)
+        textView.attributedText = full
 
         textViewConstraints = [
             textView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
             textView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
             textView.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -20),
             textView.widthAnchor.constraint(lessThanOrEqualToConstant: 520),
+        ]
+
+        // animatingtextView overlays textView exactly so the fade lands on top
+        // of the (alpha-0) base layer that fixes the cell's final height.
+        animatingTextViewConstraints = [
+            animatingtextView.leadingAnchor.constraint(equalTo: textView.leadingAnchor),
+            animatingtextView.topAnchor.constraint(equalTo: textView.topAnchor),
+            animatingtextView.trailingAnchor.constraint(equalTo: textView.trailingAnchor),
+            animatingtextView.bottomAnchor.constraint(equalTo: textView.bottomAnchor),
         ]
 
         // Bottom anchor depends on whether the card is visible. When the
@@ -1473,6 +1674,42 @@ class MessagingCell: UITableViewCell {
         }
         NSLayoutConstraint.activate(textViewConstraints)
         NSLayoutConstraint.activate(onboardingCardConstraints)
+
+        if animate {
+            // The card's slot is already reserved by the constraints above, so
+            // typing the prose out and then fading the pills in causes no
+            // layout shift. Type on the base (alpha-0) textView, then reveal
+            // the pills on completion.
+            NSLayoutConstraint.activate(animatingTextViewConstraints)
+            // Hold the pills hidden + nudged down until the prose finishes,
+            // then rise them into place. Skipped when there's no interactive
+            // card (e.g. the terminal `.done` sign-off): the text still types
+            // on, there's just nothing to reveal afterwards. The transform is
+            // a transform, not a constraint change, so the reserved slot's
+            // height is untouched and nothing reflows.
+            if hasInteractiveCard {
+                onboardingCardView.alpha = 0
+                onboardingCardView.transform = CGAffineTransform(translationX: 0, y: 8)
+            }
+            startTypeOnReveal(full: full) { [weak self] in
+                guard let self = self, hasInteractiveCard else { return }
+                UIView.animate(withDuration: 0.3,
+                               delay: 0,
+                               usingSpringWithDamping: 0.82,
+                               initialSpringVelocity: 0,
+                               options: [.curveEaseOut]) {
+                    self.onboardingCardView.alpha = 1
+                    self.onboardingCardView.transform = .identity
+                }
+            }
+        } else {
+            // Instant render: full prose, pills already visible.
+            stopTypeOnReveal()
+            textView.alpha = 1
+            animatingtextView.alpha = 0
+            onboardingCardView.alpha = 1
+            onboardingCardView.transform = .identity
+        }
     }
 
     fileprivate func applyFileAttachment(_ attachment: FileAttachment,
