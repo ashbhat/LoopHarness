@@ -34,9 +34,8 @@ class MessageBox: UIView {
     /// enough that pasting a wall of text doesn't push the chat off-screen.
     fileprivate static let inputMaxHeight: CGFloat = 140
     let sendButton = UIButton()
-    /// Paperclip button shown in the same slot as `sendButton` while the
-    /// textfield is empty AND no attachment is staged. Tapping opens the
-    /// camera / photo library / files action sheet.
+    /// Paperclip button on the left side of the input bar. Always visible;
+    /// tapping opens the camera / photo library / files action sheet.
     let attachButton = UIButton()
     let keyboardButton = UIButton()
     let micButton = UIButton()
@@ -110,9 +109,9 @@ class MessageBox: UIView {
     private(set) var isLongPressRecording = false
     /// "Release to send" pill shown above the mic button during long-press recording.
     /// The label sits inside a tinted container so the affordance reads as a pill
-    /// rather than free-floating text; the container is left-aligned with the mic
+    /// rather than free-floating text; the container is right-aligned with the mic
     /// button so the longest English string ("Release to send") cannot run off
-    /// the leading edge of the screen.
+    /// the trailing edge of the screen.
     private let releaseToSendPill = UIView()
     private let releaseToSendLabel = UILabel()
 
@@ -150,11 +149,15 @@ class MessageBox: UIView {
         self.addSubview(containerView)
         self.addSubview(recordingContainerView)
         
-        // Mic button is outside the container, add to main view
+        // Attach button is outside the container on the left, add to main view
+        attachButton.translatesAutoresizingMaskIntoConstraints = false
+        self.addSubview(attachButton)
+        
+        // Mic button is outside the container on the right, add to main view
         micButton.translatesAutoresizingMaskIntoConstraints = false
         self.addSubview(micButton)
         
-        let views = [textView, sendButton, attachButton, keyboardButton, emptyLabel]
+        let views = [textView, sendButton, keyboardButton, emptyLabel]
         for view in views {
             view.translatesAutoresizingMaskIntoConstraints = false
             self.containerView.addSubview(view)
@@ -181,8 +184,14 @@ class MessageBox: UIView {
         self.attachmentChipBottomConstraint = chipBottom
 
         NSLayoutConstraint.activate([
-            // Mic button constraints - outside container, to the left, aligned to bottom
-            micButton.leadingAnchor.constraint(equalTo: self.leadingAnchor, constant: 15),
+            // Attach button constraints - outside container, to the left, aligned to bottom
+            attachButton.leadingAnchor.constraint(equalTo: self.leadingAnchor, constant: 15),
+            attachButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -3),
+            attachButton.widthAnchor.constraint(equalToConstant: 40),
+            attachButton.heightAnchor.constraint(equalToConstant: 40),
+
+            // Mic button constraints - outside container, to the right, aligned to bottom
+            micButton.trailingAnchor.constraint(equalTo: self.trailingAnchor, constant: -15),
             micButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -3),
             micButton.widthAnchor.constraint(equalToConstant: 50),
             micButton.heightAnchor.constraint(equalToConstant: 50),
@@ -209,19 +218,19 @@ class MessageBox: UIView {
             attachmentRemoveButton.widthAnchor.constraint(equalToConstant: 24),
             attachmentRemoveButton.heightAnchor.constraint(equalToConstant: 24),
 
-            // Container view constraints - starts after mic button
-            containerView.leadingAnchor.constraint(equalTo: micButton.trailingAnchor, constant: 10),
+            // Container view constraints - between attach button (left) and mic button (right)
+            containerView.leadingAnchor.constraint(equalTo: attachButton.trailingAnchor, constant: 10),
             containerView.topAnchor.constraint(equalTo: self.topAnchor, constant: 15),
-            containerView.trailingAnchor.constraint(equalTo: self.trailingAnchor, constant: -15),
+            containerView.trailingAnchor.constraint(equalTo: micButton.leadingAnchor, constant: -10),
             containerView.bottomAnchor.constraint(equalTo: self.safeAreaLayoutGuide.bottomAnchor, constant: -15),
             containerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 50),
             
             // Recording container view constraints (initially hidden).
             // Min-height matches the normal input container so swapping in
             // and out keeps the bar at the same visual size.
-            recordingContainerView.leadingAnchor.constraint(equalTo: micButton.trailingAnchor, constant: 10),
+            recordingContainerView.leadingAnchor.constraint(equalTo: attachButton.trailingAnchor, constant: 10),
             recordingContainerView.topAnchor.constraint(equalTo: self.topAnchor, constant: 15),
-            recordingContainerView.trailingAnchor.constraint(equalTo: self.trailingAnchor, constant: -15),
+            recordingContainerView.trailingAnchor.constraint(equalTo: micButton.leadingAnchor, constant: -10),
             recordingContainerView.bottomAnchor.constraint(equalTo: self.safeAreaLayoutGuide.bottomAnchor, constant: -15),
             recordingContainerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 50),
             
@@ -241,13 +250,6 @@ class MessageBox: UIView {
             sendButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10),
             sendButton.widthAnchor.constraint(equalToConstant: 40),
             sendButton.heightAnchor.constraint(equalToConstant: 40),
-
-            // Attach button overlays the send button's slot — exactly one is
-            // visible at a time (see `refreshTrailingButton`).
-            attachButton.trailingAnchor.constraint(equalTo: sendButton.trailingAnchor),
-            attachButton.bottomAnchor.constraint(equalTo: sendButton.bottomAnchor),
-            attachButton.widthAnchor.constraint(equalToConstant: 40),
-            attachButton.heightAnchor.constraint(equalToConstant: 40),
 
             emptyLabel.leadingAnchor.constraint(equalTo: textView.leadingAnchor, constant: 5),
             emptyLabel.centerYAnchor.constraint(equalTo: textView.centerYAnchor),
@@ -272,6 +274,7 @@ class MessageBox: UIView {
         
         keyboardButton.isHidden = true
         sendButton.setContentHuggingPriority(.required, for: .horizontal)
+        attachButton.setContentHuggingPriority(.required, for: .horizontal)
         micButton.setContentHuggingPriority(.required, for: .horizontal)
         
 
@@ -316,11 +319,11 @@ class MessageBox: UIView {
         sendButton.layer.cornerRadius = 20
         sendButton.addTarget(self, action: #selector(sendButtonTapped), for: .touchUpInside)
 
-        // Attach button — paperclip in the same slot. Tinted to read as a
-        // muted "secondary" affordance until tapped.
+        // Attach button — paperclip, standalone on the left. Styled to
+        // match the mic button's circular treatment.
         attachButton.setImage(UIImage(systemName: "paperclip", withConfiguration: UIImage.SymbolConfiguration(font: UIFont.systemFont(ofSize: 18, weight: .regular))), for: .normal)
         attachButton.tintColor = .secondaryLabel
-        attachButton.backgroundColor = UIColor.tertiarySystemBackground
+        attachButton.backgroundColor = UIColor.systemGray6
         attachButton.layer.cornerRadius = 20
         attachButton.addTarget(self, action: #selector(attachButtonTapped), for: .touchUpInside)
 
@@ -349,7 +352,7 @@ class MessageBox: UIView {
         keyboardButton.tintColor = .secondaryLabel
         keyboardButton.addTarget(self, action: #selector(keyboardButtonTapped), for: .touchUpInside)
         
-        // Mic button setup - ChatGPT-like separate button outside container
+        // Mic button setup - separate button outside container on the right
         micButton.setImage(UIImage(systemName: "mic.fill", withConfiguration: UIImage.SymbolConfiguration(font: UIFont.systemFont(ofSize: 20))), for: .normal)
         micButton.tintColor = .secondaryLabel
         micButton.backgroundColor = UIColor.systemGray6
@@ -400,8 +403,8 @@ class MessageBox: UIView {
         emptyLabel.font = UIFont.preferredFont(forTextStyle: .body)
 
         // "Release to send" pill — hidden by default, shown during long-press
-        // recording. Sits above the mic button, left-aligned with it (NOT
-        // centered) so longer English strings can't run off the leading edge.
+        // recording. Sits above the mic button, right-aligned with it (NOT
+        // centered) so longer English strings can't run off the trailing edge.
         releaseToSendPill.backgroundColor = UIColor.label.withAlphaComponent(0.88)
         releaseToSendPill.layer.cornerRadius = 13
         releaseToSendPill.layer.cornerCurve = .continuous
@@ -417,7 +420,7 @@ class MessageBox: UIView {
         releaseToSendPill.addSubview(releaseToSendLabel)
 
         NSLayoutConstraint.activate([
-            releaseToSendPill.leadingAnchor.constraint(equalTo: micButton.leadingAnchor),
+            releaseToSendPill.trailingAnchor.constraint(equalTo: micButton.trailingAnchor),
             releaseToSendPill.bottomAnchor.constraint(equalTo: micButton.topAnchor, constant: -8),
             releaseToSendPill.heightAnchor.constraint(equalToConstant: 26),
 
@@ -426,7 +429,7 @@ class MessageBox: UIView {
             releaseToSendLabel.centerYAnchor.constraint(equalTo: releaseToSendPill.centerYAnchor)
         ])
 
-        // Initial state: nothing typed, nothing staged → paperclip showing.
+        // Initial state: nothing typed, nothing staged → send hidden.
         refreshTrailingButton()
         refreshAttachmentChip()
 
@@ -1205,17 +1208,15 @@ extension MessageBox: UITextViewDelegate {
 }
 
 extension MessageBox {
-    /// Picks which of `sendButton` / `attachButton` is visible based on
-    /// whether there's anything ready to send (typed text OR a staged
-    /// attachment). Called from `textViewDidChange`, from `pendingAttachment`'s
-    /// didSet, and after a send to reset the state.
+    /// Shows or hides `sendButton` based on whether there's anything ready
+    /// to send (typed text OR a staged attachment). The attach button is now
+    /// a standalone button on the left and is always visible.
     fileprivate func refreshTrailingButton() {
         let hasText = (textView.text?.count ?? 0) > 0
         let hasAttachment = pendingAttachment != nil
         let showSend = hasText || hasAttachment
 
         sendButton.isHidden = !showSend
-        attachButton.isHidden = showSend
 
         sendButton.tintColor = showSend ? .white : .secondaryLabel
         sendButton.backgroundColor = showSend ? .systemBlue : UIColor.tertiarySystemBackground
