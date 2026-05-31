@@ -12,6 +12,7 @@ paths = [
   '''\.env\.example''',
   '''Secrets\.xcconfig\.example''',
   '''SECURITY\.md''',
+  '''docs/TESTFLIGHT\.md''',
 ]
 
 regexes = [
